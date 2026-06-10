@@ -1,0 +1,623 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────
+
+enum UserRole {
+  SUPER_ADMIN
+  TENANT_OWNER
+  TENANT_ADMIN
+  MANAGER
+  AGENT
+  VIEWER
+  API_USER
+}
+
+enum SessionStatus {
+  INITIALIZING
+  QR_PENDING
+  CONNECTED
+  DISCONNECTED
+  ERROR
+}
+
+enum SubscriptionPlan {
+  BASIC
+  GROWTH
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  TRIALING
+  PAST_DUE
+  CANCELED
+  UNPAID
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  OVERDUE
+  CANCELED
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageStatus {
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  AUDIO
+  DOCUMENT
+  STICKER
+  LOCATION
+  CONTACT_CARD
+  TEMPLATE
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  RUNNING
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum CampaignContactStatus {
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+  OPTED_OUT
+}
+
+enum ConversationStatus {
+  OPEN
+  ASSIGNED
+  RESOLVED
+  SNOOZED
+}
+
+enum WebhookEvent {
+  MESSAGE_INBOUND
+  MESSAGE_STATUS_UPDATE
+  SESSION_CONNECTED
+  SESSION_DISCONNECTED
+  CAMPAIGN_COMPLETED
+  CONTACT_CREATED
+  CONVERSATION_ASSIGNED
+}
+
+enum AuditAction {
+  CREATE
+  READ
+  UPDATE
+  DELETE
+  DOWNLOAD
+  LOGIN
+  LOGOUT
+  SESSION_CONNECT
+  SESSION_DISCONNECT
+  CAMPAIGN_START
+  CAMPAIGN_STOP
+  API_KEY_CREATE
+  API_KEY_REVOKE
+}
+
+// ─────────────────────────────────────────
+//  tenants
+// ─────────────────────────────────────────
+
+model Tenant {
+  id                 String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name               String           @db.VarChar(100)
+  slug               String           @unique @db.VarChar(50)
+  email              String           @unique @db.VarChar(255)
+  plan               SubscriptionPlan @default(BASIC)
+  isActive           Boolean          @default(true)
+  maxSessions        Int              @default(1)
+  maxMessages        Int              @default(1000)
+  maxContacts        Int              @default(500)
+  razorpayCustomerId String?          @db.VarChar(100)
+  metadata           Json?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  deletedAt          DateTime?
+
+  users         User[]
+  sessions      Session[]
+  contacts      Contact[]
+  conversations Conversation[]
+  campaigns     Campaign[]
+  apiKeys       ApiKey[]
+  webhooks      Webhook[]
+  auditLogs     AuditLog[]
+  messages      Message[]
+  subscription  Subscription?
+  invoices      Invoice[]
+
+  @@index([slug])
+  @@index([isActive])
+  @@map("tenants")
+}
+
+// ─────────────────────────────────────────
+//  2: users
+// ─────────────────────────────────────────
+
+model User {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String    @db.Uuid
+  email        String    @db.VarChar(255)
+  passwordHash String    @db.VarChar(255)
+  firstName    String    @db.VarChar(50)
+  lastName     String    @db.VarChar(50)
+  role         UserRole  @default(AGENT)
+  avatarUrl    String?   @db.VarChar(500)
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+  loginCount   Int       @default(0)   
+  timezone     String    @default("UTC") @db.VarChar(50)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  tenant                Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  refreshTokens         RefreshToken[]
+  assignedConversations Conversation[] @relation("AssignedAgent")
+  auditLogs             AuditLog[]
+  createdSessions       Session[]      @relation("SessionCreator")
+  createdCampaigns      Campaign[]     @relation("CampaignCreator") 
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@index([tenantId, isActive])
+  @@map("users")
+}
+
+// ─────────────────────────────────────────
+//  3: refresh_tokens
+// ─────────────────────────────────────────
+
+model RefreshToken {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @db.Uuid
+  token     String   @unique @db.VarChar(255)
+  expiresAt DateTime
+  userAgent String?  @db.VarChar(500)
+  ipAddress String?  @db.VarChar(45)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// ─────────────────────────────────────────
+//  4: sessions (WhatsApp connections)
+// ─────────────────────────────────────────
+
+model Session {
+  id               String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId         String        @db.Uuid
+  createdById      String        @db.Uuid
+  name             String        @db.VarChar(100)
+  phoneNumber      String?       @db.VarChar(20)
+  status           SessionStatus @default(INITIALIZING)
+  openwaId         String?       @unique @db.VarChar(100)
+  qrCode           String?       @db.Text
+  lastSeenAt       DateTime?
+  messagesSent     Int           @default(0)
+  metadata         Json?
+  engineInstanceId String?       @db.VarChar(100)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy      User            @relation("SessionCreator", fields: [createdById], references: [id])
+  conversations  Conversation[]
+  messages       Message[]
+  campaigns      Campaign[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, createdById])
+  @@map("sessions")
+}
+
+// ─────────────────────────────────────────
+//  5: contacts
+// ─────────────────────────────────────────
+
+model Contact {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String    @db.Uuid
+  phoneNumber String    @db.VarChar(20)
+  name        String    @db.VarChar(100)  
+  email       String?   @db.VarChar(255)
+  avatarUrl   String?   @db.VarChar(500)
+  notes       String?   @db.Text
+  isBlocked   Boolean   @default(false)
+  isOptedOut  Boolean   @default(false)
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tags             ContactTag[]
+  conversations    Conversation[]
+  campaignContacts CampaignContact[]
+
+  @@unique([tenantId, phoneNumber])
+  @@index([tenantId])
+  @@index([tenantId, isBlocked])
+  @@map("contacts")
+}
+
+// ─────────────────────────────────────────
+//  6: contact_tags
+// ─────────────────────────────────────────
+
+model ContactTag {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  contactId String   @db.Uuid
+  tenantId  String   @db.Uuid
+  tag       String   @db.VarChar(50)
+  createdAt DateTime @default(now())
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([contactId, tag])
+  @@index([tenantId, tag])
+  @@map("contact_tags")
+}
+
+// ─────────────────────────────────────────
+//  7: conversations
+// ─────────────────────────────────────────
+
+model Conversation {
+  id              String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String             @db.Uuid
+  sessionId       String?            @db.Uuid
+  contactId       String?            @db.Uuid
+  phoneNumber     String             @db.VarChar(20)
+  status          ConversationStatus @default(OPEN)
+  assignedAgentId String?            @db.Uuid
+  subject         String?            @db.VarChar(255)
+  unreadCount     Int                @default(0)
+  lastMessageAt   DateTime?
+  lastMessageText String?            @db.VarChar(500)
+  snoozedUntil    DateTime?
+  metadata        Json?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  session       Session?  @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  contact       Contact?  @relation(fields: [contactId], references: [id])
+  assignedAgent User?     @relation("AssignedAgent", fields: [assignedAgentId], references: [id])
+  messages      Message[]
+
+  @@unique([tenantId, sessionId, phoneNumber])
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, assignedAgentId])
+  @@index([lastMessageAt])
+  @@map("conversations")
+}
+
+// ─────────────────────────────────────────
+//  8: messages
+// ─────────────────────────────────────────
+
+model Message {
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String           @db.Uuid
+  sessionId      String?           @db.Uuid
+  conversationId String?          @db.Uuid
+  campaignId     String?          @db.Uuid
+  direction      MessageDirection
+  type           MessageType      @default(TEXT)
+  status         MessageStatus    @default(PENDING)
+  fromNumber     String           @db.VarChar(20)
+  toNumber       String           @db.VarChar(20)
+  body           String?          @db.Text
+  mediaUrl       String?          @db.VarChar(1000)
+  mediaType      String?          @db.VarChar(50)
+  caption        String?          @db.VarChar(1000)
+  externalId     String?          @db.VarChar(100)
+  errorMessage   String?          @db.VarChar(500)
+  sentAt         DateTime?
+  deliveredAt    DateTime?
+  readAt         DateTime?
+  failedAt       DateTime?
+  metadata       Json?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  session      Session?      @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  conversation Conversation? @relation(fields: [conversationId], references: [id])
+  campaign     Campaign?     @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, conversationId])
+  @@index([tenantId, campaignId])
+  @@index([externalId])
+  @@index([toNumber, tenantId])
+  @@map("messages")
+}
+
+// ─────────────────────────────────────────
+//  9: campaigns
+// ─────────────────────────────────────────
+
+model Campaign {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String         @db.Uuid
+  sessionId       String         @db.Uuid
+  createdById     String         @db.Uuid
+  name            String         @db.VarChar(100)
+  description     String?        @db.Text
+  status          CampaignStatus @default(DRAFT)
+  messageTemplate String         @db.Text
+  mediaUrl        String?        @db.VarChar(1000)
+  scheduledAt     DateTime?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  totalContacts   Int            @default(0)
+  sentCount       Int            @default(0)
+  deliveredCount  Int            @default(0)
+  readCount       Int            @default(0)
+  failedCount     Int            @default(0)
+  rateLimitPerMin Int            @default(30)
+  metadata        Json?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  tenant    Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  session   Session           @relation(fields: [sessionId], references: [id])
+  createdBy User              @relation("CampaignCreator", fields: [createdById], references: [id])
+  contacts  CampaignContact[]
+  messages  Message[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, createdById])
+  @@index([scheduledAt])
+  @@map("campaigns")
+}
+
+// ─────────────────────────────────────────
+//  10: campaign_contacts
+// ─────────────────────────────────────────
+
+model CampaignContact {
+  id           String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  campaignId   String                @db.Uuid
+  contactId    String?               @db.Uuid
+  tenantId     String                @db.Uuid
+  phoneNumber  String                @db.VarChar(20)
+  status       CampaignContactStatus @default(PENDING)
+  messageId    String?               @db.Uuid
+  retryCount   Int                   @default(0)
+  sentAt       DateTime?
+  deliveredAt  DateTime?
+  readAt       DateTime?
+  failedAt     DateTime?
+  errorMessage String?               @db.VarChar(500)
+  createdAt    DateTime              @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact  Contact? @relation(fields: [contactId], references: [id])
+
+  @@unique([campaignId, phoneNumber])
+  @@index([campaignId, status])
+  @@index([tenantId])
+  @@map("campaign_contacts")
+}
+
+// ─────────────────────────────────────────
+//  11: api_keys
+// ─────────────────────────────────────────
+
+model ApiKey {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String    @db.Uuid
+  name        String    @db.VarChar(100)
+  keyHash     String    @unique @db.VarChar(255)
+  keyPrefix   String    @db.VarChar(10)
+  permissions Json?
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([keyHash])
+  @@map("api_keys")
+}
+
+// ─────────────────────────────────────────
+//  12: webhooks
+// ─────────────────────────────────────────
+
+model Webhook {
+  id          String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String         @db.Uuid
+  name        String         @db.VarChar(100)
+  url         String         @db.VarChar(2000)
+  events      WebhookEvent[] 
+  secretHash  String         @db.VarChar(255)
+  isActive    Boolean        @default(true)
+  failCount   Int            @default(0)
+  lastTriedAt DateTime?
+  lastOkAt    DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  tenant     Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  deliveries WebhookDelivery[]
+
+  @@index([tenantId])
+  @@map("webhooks")
+}
+
+// ─────────────────────────────────────────
+//  13: webhook_deliveries
+// ─────────────────────────────────────────
+
+model WebhookDelivery {
+  id           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  webhookId    String       @db.Uuid
+  tenantId     String       @db.Uuid
+  event        WebhookEvent
+  payload      Json
+  statusCode   Int?
+  responseBody String?      @db.Text
+  attempt      Int          @default(1)
+  success      Boolean      @default(false)
+  duration     Int?
+  nextRetryAt  DateTime?
+  createdAt    DateTime     @default(now())
+
+  webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId])
+  @@index([tenantId, event])
+  @@index([nextRetryAt])
+  @@map("webhook_deliveries")
+}
+
+// ─────────────────────────────────────────
+//  14: audit_logs
+// ─────────────────────────────────────────
+
+model AuditLog {
+  id         String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String      @db.Uuid
+  userId     String      @db.Uuid
+  action     AuditAction
+  entityType String      @db.VarChar(50)
+  entityId   String?     @db.Uuid
+  ipAddress  String?     @db.VarChar(45)
+  userAgent  String?     @db.VarChar(500)
+  before     Json?
+  after      Json?
+  metadata   Json?
+  createdAt  DateTime    @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User   @relation(fields: [userId], references: [id]) 
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, entityType, entityId])
+  @@index([tenantId, userId])
+  @@map("audit_logs")
+}
+
+// ─────────────────────────────────────────
+//  15: subscriptions
+// ─────────────────────────────────────────
+
+model Subscription {
+  id                     String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId               String             @unique @db.Uuid
+  plan                   SubscriptionPlan
+  status                 SubscriptionStatus @default(ACTIVE)
+  razorpaySubscriptionId String?            @unique @db.VarChar(100)
+  currentPeriodStart     DateTime
+  currentPeriodEnd       DateTime
+  trialStart             DateTime?
+  trialEnd               DateTime?
+  monthlyPrice           Decimal            @db.Decimal(10, 2)
+  canceledAt             DateTime?
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoices Invoice[]
+
+  @@index([status])
+  @@map("subscriptions")
+}
+
+// ─────────────────────────────────────────
+//  16: invoices
+// ─────────────────────────────────────────
+
+model Invoice {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String        @db.Uuid
+  subscriptionId    String        @db.Uuid
+  invoiceNumber     String        @unique @db.VarChar(50)
+  razorpayInvoiceId String?       @unique @db.VarChar(100)
+  amount            Decimal       @db.Decimal(10, 2)
+  currency          String        @default("INR") @db.VarChar(3)
+  status            InvoiceStatus @default(DRAFT)
+  issuedAt          DateTime
+  dueAt             DateTime
+  paidAt            DateTime?
+  description       String?       @db.Text
+  notes             Json?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id])
+  subscription Subscription @relation(fields: [subscriptionId], references: [id])
+
+  @@index([tenantId, issuedAt])
+  @@index([subscriptionId])
+  @@map("invoices")
+}
+
+
+// ─────────────────────────────────────────
+//  WebhookLog
+// ─────────────────────────────────────────
+
+model WebhookLog {
+  id         String   @id @default(uuid())
+  eventType  String
+  instanceId String
+  sessionId  String
+  payload    Json
+  receivedAt DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([sessionId])
+  @@index([eventType])
+  @@index([createdAt])
+}
