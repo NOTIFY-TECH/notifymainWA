@@ -45,10 +45,11 @@ Thumbs.db
 
 # Data and storage
 data/
-media/
 uploads/
 .wwebjs_auth/
 .wwebjs_cache/
+**/public/media/
+**/uploads/media/
 
 # Database
 *.db
