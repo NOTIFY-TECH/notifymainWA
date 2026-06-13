@@ -130,6 +130,36 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
     return () => unsubscribe('message:received', handleIncoming);
   }, [subscribe, unsubscribe, handleIncoming]);
 
+  // ── WebSocket — update message status on ack ──────────────────────────────
+  const handleAck = useCallback(
+    (event: { messageId: string; status: string }) => {
+      queryClient.setQueryData(
+        conversationKeys.messages(tenantId, conversationId),
+        (old: InfiniteData<CursorPaginatedResponse<Message>> | undefined) => {
+          if (!old) return old;
+          return {
+            ...old,
+            pages: old.pages.map(page => ({
+              ...page,
+              data: page.data.map(msg => {
+                if (msg.id === event.messageId) {
+                  console.log('[ACK] found message, updating to:', event.status);
+                }
+                return msg.id === event.messageId ? { ...msg, status: event.status as Message['status'] } : msg;
+              }),
+            })),
+          };
+        },
+      );
+    },
+    [conversationId, tenantId, queryClient],
+  );
+
+  useEffect(() => {
+    subscribe('message:ack', handleAck);
+    return () => unsubscribe('message:ack', handleAck);
+  }, [subscribe, unsubscribe, handleAck]);
+
   // ── Send handler — text or media ──────────────────────────────────────────
   const handleSend = useCallback(
     (payload: { text?: string; mediaUrl?: string; mediaType?: string; caption?: string; type: string }) => {

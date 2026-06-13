@@ -15,13 +15,13 @@ interface MessageBubbleProps {
 function StatusIcon({ status }: { status: Message['status'] }) {
   switch (status) {
     case 'PENDING':
-      return <Clock size={11} className="text-white/60" />;
+      return <Clock size={11} className="text-white/50" />;
     case 'SENT':
       return <Check size={11} className="text-white/60" />;
     case 'DELIVERED':
-      return <CheckCheck size={11} className="text-white/60" />;
+      return <CheckCheck size={11} className="text-white/80" />;
     case 'READ':
-      return <CheckCheck size={11} className="text-[hsl(var(--green))]" />;
+      return <CheckCheck size={11} className="text-blue-400" />;
     case 'FAILED':
       return <AlertCircle size={11} className="text-red-400" />;
     default:
@@ -141,6 +141,13 @@ export default function MessageBubble({ message }: MessageBubbleProps) {
 
         {/* Text body */}
         {hasText && <p className="leading-relaxed whitespace-pre-wrap">{message.body}</p>}
+
+        {/* Fallback — inbound sticker/GIF/unsupported with no renderable content */}
+        {!hasMedia && !hasText && (
+          <p className={cn('text-xs italic', isOutbound ? 'text-white/50' : 'text-[hsl(var(--muted-foreground))]')}>
+            [Media message]
+          </p>
+        )}
 
         {/* Timestamp + status */}
         <div className={cn('flex items-center gap-1 mt-1', isOutbound ? 'justify-end' : 'justify-start')}>

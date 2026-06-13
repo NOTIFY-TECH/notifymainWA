@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "messages" ALTER COLUMN "fromNumber" SET DATA TYPE VARCHAR(50),
+ALTER COLUMN "toNumber" SET DATA TYPE VARCHAR(50);

@@ -348,8 +348,8 @@ model Message {
   direction      MessageDirection
   type           MessageType      @default(TEXT)
   status         MessageStatus    @default(PENDING)
-  fromNumber     String           @db.VarChar(20)
-  toNumber       String           @db.VarChar(20)
+  fromNumber     String           @db.VarChar(50)
+  toNumber       String           @db.VarChar(50)
   body           String?          @db.Text
   mediaUrl       String?          @db.VarChar(1000)
   mediaType      String?          @db.VarChar(50)

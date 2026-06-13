@@ -3,6 +3,11 @@ import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { GatewayService } from '../gateway/gateway.service';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import { v4 as uuidv4 } from 'uuid';
+import { ConfigService } from '@nestjs/config';
+import { ALLOWED_MIME_TYPES } from '../media/media.module';
 
 @Processor('webhook-events')
 export class WebhooksProcessor extends WorkerHost {
@@ -11,6 +16,7 @@ export class WebhooksProcessor extends WorkerHost {
   constructor(
     private readonly prisma: PrismaService,
     private readonly gatewayService: GatewayService,
+    private readonly config: ConfigService,
   ) {
     super();
   }
@@ -27,6 +33,9 @@ export class WebhooksProcessor extends WorkerHost {
         break;
       case 'message.received':
         await this.handleMessageReceived(job.data);
+        break;
+      case 'message.outgoing':
+        await this.handleMessageOutgoing(job.data);
         break;
       case 'message.ack':
         await this.handleMessageAck(job.data);
@@ -48,6 +57,13 @@ export class WebhooksProcessor extends WorkerHost {
             : null,
       },
     });
+
+    if (result.count === 0) {
+      this.logger.warn(
+        `session.connected — no DB record found for openwaId: ${data.sessionId}. Engine and DB are out of sync.`,
+      );
+      return;
+    }
 
     const session = await this.prisma.session.findFirst({
       where: { openwaId: data.sessionId },
@@ -89,95 +105,316 @@ export class WebhooksProcessor extends WorkerHost {
   }
 
   private async handleMessageReceived(data: any): Promise<void> {
-    const session = await this.prisma.session.findFirst({
-      where: { openwaId: data.sessionId },
-      select: { id: true, tenantId: true },
-    });
+    try {
+      const session = await this.prisma.session.findFirst({
+        where: { openwaId: data.sessionId },
+        select: { id: true, tenantId: true },
+      });
 
-    if (!session) {
-      this.logger.warn(
-        `message.received — session not found: ${data.sessionId}`,
+      if (!session) {
+        this.logger.warn(
+          `message.received — session not found: ${data.sessionId}`,
+        );
+        return;
+      }
+
+      const payload = data.payload ?? {};
+      const fromNumber: string = payload.from ?? data.from ?? '';
+      const rawType: string = payload.type?.toUpperCase() ?? 'TEXT';
+
+      // ── Normalise message type to only accepted enum values ──
+      const ALLOWED_TYPES = [
+        'TEXT',
+        'IMAGE',
+        'VIDEO',
+        'AUDIO',
+        'DOCUMENT',
+        'LOCATION',
+        'CONTACT_CARD',
+        'TEMPLATE',
+      ];
+      const messageType = ALLOWED_TYPES.includes(rawType) ? rawType : 'TEXT';
+
+      this.logger.debug(
+        `Message type raw=${rawType} normalised=${messageType} from=${fromNumber}`,
       );
-      return;
-    }
 
-    const payload = data.payload ?? {};
-    const fromNumber: string = payload.from ?? data.from ?? '';
-    const messageBody: string = payload.body ?? payload.text ?? '';
-    const messageType: string = payload.type?.toUpperCase() ?? 'TEXT';
-    const now = new Date(data.timestamp ?? Date.now());
+      const {
+        body: messageBody,
+        mediaUrl,
+        mediaType,
+      } = this.extractMessageContent(payload, messageType, session.tenantId);
 
-    // ── 1. Upsert conversation ──────────────────────────────────────────────
-    // Find existing contact for this phone number (optional link)
-    const contact = await this.prisma.contact.findUnique({
-      where: {
-        tenantId_phoneNumber: {
-          tenantId: session.tenantId,
-          phoneNumber: fromNumber,
+      const now = new Date(data.timestamp ?? Date.now());
+
+      const contact = await this.prisma.contact.findUnique({
+        where: {
+          tenantId_phoneNumber: {
+            tenantId: session.tenantId,
+            phoneNumber: fromNumber,
+          },
         },
-      },
-      select: { id: true },
-    });
+        select: { id: true },
+      });
 
-    const conversation = await this.prisma.conversation.upsert({
-      where: {
-        tenantId_sessionId_phoneNumber: {
+      const conversation = await this.prisma.conversation.upsert({
+        where: {
+          tenantId_sessionId_phoneNumber: {
+            tenantId: session.tenantId,
+            sessionId: session.id,
+            phoneNumber: fromNumber,
+          },
+        },
+        create: {
           tenantId: session.tenantId,
           sessionId: session.id,
           phoneNumber: fromNumber,
+          contactId: contact?.id ?? null,
+          status: 'OPEN',
+          unreadCount: 1,
+          lastMessageAt: now,
+          lastMessageText: messageBody.slice(0, 500),
         },
-      },
-      create: {
-        tenantId: session.tenantId,
-        sessionId: session.id,
-        phoneNumber: fromNumber,
-        contactId: contact?.id ?? null,
-        status: 'OPEN',
-        unreadCount: 1,
-        lastMessageAt: now,
-        lastMessageText: messageBody.slice(0, 500),
-      },
-      update: {
-        unreadCount: { increment: 1 },
-        lastMessageAt: now,
-        lastMessageText: messageBody.slice(0, 500),
-        // Re-link contact if it was created after the conversation
-        ...(contact?.id ? { contactId: contact.id } : {}),
-        // Re-open if it was resolved/snoozed
-        status: 'OPEN',
-      },
-    });
+        update: {
+          unreadCount: { increment: 1 },
+          lastMessageAt: now,
+          lastMessageText: messageBody.slice(0, 500),
+          ...(contact?.id ? { contactId: contact.id } : {}),
+          status: 'OPEN',
+        },
+      });
 
-    // ── 2. Create message linked to conversation ────────────────────────────
-    const message = await this.prisma.message.create({
-      data: {
-        tenantId: session.tenantId,
-        sessionId: session.id,
+      const message = await this.prisma.message.create({
+        data: {
+          tenantId: session.tenantId,
+          sessionId: session.id,
+          conversationId: conversation.id,
+          fromNumber,
+          toNumber: '',
+          body: messageBody,
+          type: messageType as any,
+          mediaUrl,
+          mediaType,
+          direction: 'INBOUND',
+          status: 'DELIVERED',
+          externalId: payload.externalId ?? payload.id ?? null,
+        },
+      });
+
+      this.gatewayService.emitMessageReceived(session.tenantId, {
+        messageId: message.id,
         conversationId: conversation.id,
-        fromNumber,
-        toNumber: '',
+        sessionId: data.sessionId,
+        from: message.fromNumber,
+        body: message.body,
+        type: message.type,
+        mediaUrl: message.mediaUrl,
+        mediaType: message.mediaType,
+        createdAt: message.createdAt,
+      });
+
+      this.logger.log(
+        `Message received on session ${data.sessionId}: ${messageBody.slice(0, 80)}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `handleMessageReceived failed: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw error; // rethrow so BullMQ marks job as failed
+    }
+  }
+
+  private async handleMessageOutgoing(data: any): Promise<void> {
+    try {
+      const payload = data.payload ?? {};
+      const externalId: string | undefined =
+        payload.id?._serialized ?? payload.id;
+
+      // Dedupe — if this message was already created via dashboard send, skip
+      if (externalId) {
+        const existing = await this.prisma.message.findFirst({
+          where: { externalId },
+          select: { id: true },
+        });
+        if (existing) {
+          this.logger.debug(
+            `message.outgoing — skipping duplicate, externalId: ${externalId}`,
+          );
+          return;
+        }
+      }
+
+      const session = await this.prisma.session.findFirst({
+        where: { openwaId: data.sessionId },
+        select: { id: true, tenantId: true, phoneNumber: true },
+      });
+
+      if (!session) {
+        this.logger.warn(
+          `message.outgoing — session not found: ${data.sessionId}`,
+        );
+        return;
+      }
+
+      const toNumber: string = payload.to ?? '';
+      const rawType: string = payload.type?.toUpperCase() ?? 'TEXT';
+      const ALLOWED_TYPES = [
+        'TEXT',
+        'IMAGE',
+        'VIDEO',
+        'AUDIO',
+        'DOCUMENT',
+        'LOCATION',
+        'CONTACT_CARD',
+        'TEMPLATE',
+      ];
+      const messageType = ALLOWED_TYPES.includes(rawType) ? rawType : 'TEXT';
+
+      const {
         body: messageBody,
-        type: messageType as any,
-        direction: 'INBOUND',
-        status: 'DELIVERED',
-        externalId: payload.externalId ?? payload.id ?? null,
-      },
-    });
+        mediaUrl,
+        mediaType,
+      } = this.extractMessageContent(payload, messageType, session.tenantId);
 
-    // ── 3. Emit real-time event to frontend ────────────────────────────────
-    this.gatewayService.emitMessageReceived(session.tenantId, {
-      messageId: message.id,
-      conversationId: conversation.id,
-      sessionId: data.sessionId,
-      from: message.fromNumber,
-      body: message.body,
-      type: message.type,
-      createdAt: message.createdAt,
-    });
+      const now = new Date(data.timestamp ?? Date.now());
 
-    this.logger.log(
-      `Message received on session ${data.sessionId}: ${messageBody.slice(0, 80)}`,
-    );
+      const contact = await this.prisma.contact.findUnique({
+        where: {
+          tenantId_phoneNumber: {
+            tenantId: session.tenantId,
+            phoneNumber: toNumber,
+          },
+        },
+        select: { id: true },
+      });
+
+      const conversation = await this.prisma.conversation.upsert({
+        where: {
+          tenantId_sessionId_phoneNumber: {
+            tenantId: session.tenantId,
+            sessionId: session.id,
+            phoneNumber: toNumber,
+          },
+        },
+        create: {
+          tenantId: session.tenantId,
+          sessionId: session.id,
+          phoneNumber: toNumber,
+          contactId: contact?.id ?? null,
+          status: 'OPEN',
+          unreadCount: 0,
+          lastMessageAt: now,
+          lastMessageText: messageBody.slice(0, 500),
+        },
+        update: {
+          lastMessageAt: now,
+          lastMessageText: messageBody.slice(0, 500),
+          ...(contact?.id ? { contactId: contact.id } : {}),
+        },
+      });
+
+      const message = await this.prisma.message.create({
+        data: {
+          tenantId: session.tenantId,
+          sessionId: session.id,
+          conversationId: conversation.id,
+          fromNumber: session.phoneNumber ?? '',
+          toNumber,
+          body: messageBody,
+          type: messageType as any,
+          mediaUrl,
+          mediaType,
+          direction: 'OUTBOUND',
+          status: 'SENT',
+          externalId: externalId ?? null,
+          sentAt: now,
+        },
+      });
+
+      this.gatewayService.emitMessageReceived(session.tenantId, {
+        messageId: message.id,
+        conversationId: conversation.id,
+        sessionId: data.sessionId,
+        from: message.fromNumber,
+        body: message.body,
+        type: message.type,
+        mediaUrl: message.mediaUrl,
+        mediaType: message.mediaType,
+        createdAt: message.createdAt,
+      });
+
+      this.logger.log(
+        `Outgoing message synced from phone: ${data.sessionId} → ${toNumber}: ${messageBody.slice(0, 80)}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `handleMessageOutgoing failed: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Extracts body/mediaUrl/mediaType from a wa-automate message payload.
+   * Handles both TEXT and media (base64) message types.
+   */
+  private extractMessageContent(
+    payload: any,
+    messageType: string,
+    tenantId: string,
+  ): {
+    body: string;
+    mediaUrl: string | null;
+    mediaType: string | null;
+  } {
+    if (messageType === 'TEXT') {
+      return {
+        body: payload.body ?? payload.text ?? '',
+        mediaUrl: null,
+        mediaType: null,
+      };
+    }
+
+    const body = payload.caption ?? '';
+    let mediaUrl: string | null = null;
+    const mediaType: string | null = payload.mimetype ?? null;
+
+    const base64Data: string | undefined = payload.body;
+    if (base64Data && mediaType) {
+      try {
+        const ext =
+          ALLOWED_MIME_TYPES[mediaType] ??
+          `.${mediaType.split('/')[1] ?? 'bin'}`;
+        const now = new Date();
+        const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const uploadRoot = join(
+          process.cwd(),
+          this.config.get<string>('UPLOAD_DIR', 'uploads'),
+          tenantId,
+          month,
+        );
+        if (!existsSync(uploadRoot)) {
+          mkdirSync(uploadRoot, { recursive: true });
+        }
+        const filename = `${uuidv4()}${ext}`;
+        const filePath = join(uploadRoot, filename);
+        writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
+
+        const backendUrl = this.config.get<string>(
+          'BACKEND_URL',
+          'http://localhost:3001',
+        );
+        mediaUrl = `${backendUrl}/uploads/${tenantId}/${month}/${filename}`;
+      } catch (err) {
+        this.logger.error(
+          `Failed to save media: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    return { body, mediaUrl, mediaType };
   }
 
   private async handleMessageAck(data: any): Promise<void> {
@@ -198,6 +435,20 @@ export class WebhooksProcessor extends WorkerHost {
         [ack.field]: new Date(data.timestamp),
       },
     });
+
+    // ── Emit WebSocket event so frontend updates tick in real time ──
+    const message = await this.prisma.message.findFirst({
+      where: { externalId: data.payload.externalId },
+      select: { id: true, tenantId: true },
+    });
+
+    if (message) {
+      this.gatewayService.emitMessageAck(message.tenantId, {
+        messageId: message.id,
+        externalId: data.payload.externalId,
+        status: ack.status,
+      });
+    }
 
     this.logger.log(`Message ack: ${data.payload.externalId} → ${ack.status}`);
   }

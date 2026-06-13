@@ -133,26 +133,52 @@ export class SessionsService {
     );
     const apiKey = this.config.get<string>('OPENWA_API_KEY');
 
+    // First try restart (uses existing auth — no QR needed)
     try {
       await axios.post(
         `${engine.url}/api/sessions/${session.openwaId}/restart`,
         {},
         { headers: { 'X-API-Key': apiKey } },
       );
-
-      // Optimistically update DB status to INITIALIZING
-      await this.prisma.session.update({
-        where: { id: sessionId },
-        data: { status: 'INITIALIZING' },
-      });
-
-      return { success: true, message: 'Reconnect initiated' };
-    } catch (error) {
-      this.logger.error(
-        `Failed to reconnect session: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      throw new BadRequestException('Failed to reconnect session on engine');
+    } catch (error: any) {
+      // If engine returns 404, session was lost from engine memory
+      // Re-create it on the engine using the stable openwaId
+      if (error?.response?.status === 404) {
+        this.logger.warn(
+          `Session ${session.openwaId} not found on engine — re-creating`,
+        );
+        try {
+          await axios.post(
+            `${engine.url}/api/sessions`,
+            {
+              tenantId,
+              userId: session.createdById,
+              sessionId: session.openwaId,
+            },
+            { headers: { 'X-API-Key': apiKey } },
+          );
+        } catch (createError) {
+          this.logger.error(
+            `Failed to re-create session on engine: ${createError instanceof Error ? createError.message : String(createError)}`,
+          );
+          throw new BadRequestException(
+            'Failed to reconnect session on engine',
+          );
+        }
+      } else {
+        this.logger.error(
+          `Failed to reconnect session: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        throw new BadRequestException('Failed to reconnect session on engine');
+      }
     }
+
+    await this.prisma.session.update({
+      where: { id: sessionId },
+      data: { status: 'INITIALIZING' },
+    });
+
+    return { success: true, message: 'Reconnect initiated' };
   }
 
   // Unlink WhatsApp number — clears auth, next QR scan links a new number

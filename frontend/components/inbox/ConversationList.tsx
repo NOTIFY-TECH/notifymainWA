@@ -39,20 +39,20 @@ export default function ConversationList({ activeId, onSelect }: ConversationLis
     (event: { conversationId: string }) => {
       if (event.conversationId === activeId) return; // ThreadView handles this one
 
-      queryClient.setQueriesData<Conversation[]>({ queryKey: conversationKeys.all(tenantId) }, old => {
-        if (!old) return old;
-        const idx = old.findIndex(c => c.id === event.conversationId);
+      queryClient.setQueriesData<{ data: Conversation[] }>({ queryKey: conversationKeys.all(tenantId) }, old => {
+        if (!old?.data || !Array.isArray(old.data)) return old;
+        const idx = old.data.findIndex(c => c.id === event.conversationId);
         if (idx === -1) {
           queryClient.invalidateQueries({ queryKey: conversationKeys.all(tenantId) });
           return old;
         }
         const updated = {
-          ...old[idx],
-          unreadCount: (old[idx].unreadCount ?? 0) + 1,
+          ...old.data[idx],
+          unreadCount: (old.data[idx].unreadCount ?? 0) + 1,
           lastMessageAt: new Date().toISOString(),
         };
-        const rest = old.filter((_, i) => i !== idx);
-        return [updated, ...rest];
+        const rest = old.data.filter((_, i) => i !== idx);
+        return { ...old, data: [updated, ...rest] };
       });
     },
     [activeId, tenantId, queryClient],

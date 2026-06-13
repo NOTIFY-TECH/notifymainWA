@@ -6,12 +6,12 @@ import ConversationList from '@/components/inbox/ConversationList';
 import ThreadView from '@/components/inbox/ThreadView';
 
 interface Props {
-  params: Promise<{ conversationId: string }>;  // ← Promise, not plain object
+  params: Promise<{ conversationId: string }>; // ← Promise, not plain object
 }
 
 export default function ConversationPage({ params }: Props) {
   const router = useRouter();
-  const { conversationId } = use(params);       // ← unwrap with use()
+  const { conversationId } = use(params); // ← unwrap with use()
 
   const handleSelect = (id: string) => {
     router.push(`/dashboard/inbox/${id}`);
@@ -27,7 +27,7 @@ export default function ConversationPage({ params }: Props) {
         <ConversationList activeId={conversationId} onSelect={handleSelect} />
       </div>
       <div className="flex-1 flex flex-col min-w-0 border-l border-[hsl(var(--border))]">
-        <ThreadView conversationId={conversationId} onBack={handleBack} />
+        <ThreadView key={conversationId} conversationId={conversationId} onBack={handleBack} />
       </div>
     </div>
   );

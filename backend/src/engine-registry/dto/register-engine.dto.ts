@@ -1,10 +1,10 @@
-import { IsString, IsUrl, IsInt, Min, Max } from 'class-validator';
+import { IsString, IsInt, Min, Max, Matches } from 'class-validator';
 
 export class RegisterEngineDto {
   @IsString()
   instanceId: string;
 
-  @IsUrl({ require_tld: false })
+  @Matches(/^https?:\/\/.+/, { message: 'url must be a valid http(s) URL' })
   url: string;
 
   @IsInt()

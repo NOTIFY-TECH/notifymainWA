@@ -5,7 +5,7 @@ export class SendMessageDto {
   sessionId: string;
 
   @IsString()
-  @MaxLength(20)
+  @MaxLength(50)
   to: string; // WhatsApp number e.g. 919876543210
 
   @IsIn(['text', 'image', 'document', 'audio', 'video'])

@@ -21,4 +21,12 @@ export class GatewayService {
     if (!this.server) return;
     this.server.to(`tenant:${tenantId}`).emit('session:status', payload);
   }
+
+  emitMessageAck(
+    tenantId: string,
+    payload: { messageId: string; externalId: string; status: string },
+  ) {
+    if (!this.server) return;
+    this.server.to(`tenant:${tenantId}`).emit('message:ack', payload);
+  }
 }

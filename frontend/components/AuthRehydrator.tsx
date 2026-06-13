@@ -5,6 +5,7 @@ import { useAuthStore } from '@/store/authStore';
 import { setAccessToken } from '@/services/api'; // no longer importing `api` itself
 import { AuthResponse } from '@/types/auth';
 import axios from 'axios';
+import { initializeSocket } from '@/hooks/useWebSocket';
 
 // Plain instance — no 401 interceptor, so a failed refresh doesn't loop
 const plainAxios = axios.create({
@@ -23,6 +24,7 @@ export default function AuthRehydrator() {
       .then(res => {
         setAccessToken(res.data.accessToken);
         setAuth(res.data.user, res.data.tenant);
+        initializeSocket(res.data.accessToken, res.data.tenant.id);
       })
       .catch(() => {
         // No valid cookie — stay unauthenticated

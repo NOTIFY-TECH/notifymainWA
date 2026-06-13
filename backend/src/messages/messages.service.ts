@@ -65,6 +65,7 @@ export class MessagesService {
 
     // 4. Forward to engine
     try {
+      this.logger.debug(`Sending with API key: ${JSON.stringify(apiKey)}`);
       const response = await axios.post(
         `${engine.url}/api/messages/send`,
         {
@@ -72,7 +73,7 @@ export class MessagesService {
           to: dto.to,
           type: dto.type,
           text: dto.text,
-          mediaUrl: dto.mediaUrl,
+          mediaUrl: this.toEngineAccessibleUrl(dto.mediaUrl),
           caption: dto.caption,
           messageId: message.id,
         },
@@ -84,7 +85,10 @@ export class MessagesService {
         where: { id: message.id },
         data: {
           status: 'SENT',
-          externalId: response.data?.messageId,
+          externalId:
+            typeof response.data?.messageId === 'string'
+              ? response.data.messageId
+              : null,
           sentAt: new Date(),
         },
       });
@@ -100,9 +104,17 @@ export class MessagesService {
       return {
         ...message,
         status: 'SENT',
-        externalId: response.data?.messageId,
+        externalId:
+          typeof response.data?.messageId === 'string'
+            ? response.data.messageId
+            : null,
       };
     } catch (error) {
+      if (axios.isAxiosError(error)) {
+        this.logger.error(
+          `Engine response: ${JSON.stringify(error.response?.data)}`,
+        );
+      }
       // 6. Mark as FAILED if engine call fails
       await this.prisma.message.update({
         where: { id: message.id },
@@ -193,6 +205,26 @@ export class MessagesService {
         `Redis mapping missing for session ${sessionId}, falling back to DB instanceId`,
       );
       return this.engineRegistry.getInstanceById(fallbackInstanceId);
+    }
+  }
+
+  private toEngineAccessibleUrl(url?: string): string | undefined {
+    if (!url) return url;
+    const backendUrlForEngine =
+      this.config.get<string>('BACKEND_URL_FOR_ENGINE') ??
+      'http://172.31.112.1:3001';
+    try {
+      const parsed = new URL(url);
+      if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
+        const engineHost = new URL(backendUrlForEngine);
+        parsed.hostname = engineHost.hostname;
+        parsed.port = engineHost.port;
+        parsed.protocol = engineHost.protocol;
+        return parsed.toString();
+      }
+      return url;
+    } catch {
+      return url;
     }
   }
 }
