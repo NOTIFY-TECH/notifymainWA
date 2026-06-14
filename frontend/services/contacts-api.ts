@@ -1,71 +1,118 @@
 import api from './api';
-import { Contact, CreateContactRequest, UpdateContactRequest, ContactImportResult } from '@/types/contact';
-import { ApiResponse, PaginatedResponse } from '@/types/index';
+import { PaginatedResponse } from '@/types/index';
+
+// ─── Contact Types ────────────────────────────────────────────────────────────
+
+export interface Contact {
+  id: string;
+  phoneNumber: string;
+  name: string;
+  email: string | null;
+  avatarUrl: string | null;
+  notes: string | null;
+  isBlocked: boolean;
+  isOptedOut: boolean;
+  tags: string[];
+  conversationCount: number;
+  lastMessageAt: string | null;
+  lastMessageText: string | null;
+  latestConversationId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ContactConversationSummary {
+  id: string;
+  status: string;
+  lastMessageAt: string | null;
+  lastMessageText: string | null;
+  unreadCount: number;
+  createdAt: string;
+  session: {
+    id: string;
+    name: string;
+    phoneNumber: string | null;
+  } | null;
+}
+
+export interface ContactDetail extends Omit<Contact, 'lastMessageAt' | 'lastMessageText' | 'latestConversationId'> {
+  conversations: ContactConversationSummary[];
+}
+
+export interface CreateContactRequest {
+  phoneNumber: string;
+  name: string;
+  email?: string;
+  notes?: string;
+  tags?: string[];
+}
+
+export interface UpdateContactRequest {
+  name?: string;
+  email?: string;
+  notes?: string;
+  isBlocked?: boolean;
+  isOptedOut?: boolean;
+}
+
+export interface ListContactsParams {
+  page?: number;
+  limit?: number;
+  search?: string;
+  tags?: string[];
+  isBlocked?: boolean;
+  isOptedOut?: boolean;
+  sortBy?: 'name' | 'createdAt' | 'lastMessageAt';
+  sortOrder?: 'asc' | 'desc';
+}
 
 // ─── Contacts API ─────────────────────────────────────────────────────────────
 
 export const contactsApi = {
-  // ── List contacts for a tenant (searchable, paginated) ──────────────────────
-  async list(
-    tenantId: string,
-    page = 1,
-    limit = 30,
-    search?: string,
-    tags?: string[],
-  ): Promise<PaginatedResponse<Contact>> {
+  // ── Feature 1 ─────────────────────────────────────────────────────────────
+
+  async list(tenantId: string, params?: ListContactsParams): Promise<PaginatedResponse<Contact>> {
+    const { tags, ...rest } = params ?? {};
     const response = await api.get<PaginatedResponse<Contact>>(`/tenants/${tenantId}/contacts`, {
-      params: { page, limit, search, tags: tags?.join(',') },
+      params: {
+        page: 1,
+        limit: 20,
+        ...rest,
+        ...(tags && tags.length > 0 ? { tags: tags.join(',') } : {}),
+      },
     });
     return response.data;
   },
 
-  // ── Get a single contact by ID ───────────────────────────────────────────────
-  async getById(tenantId: string, contactId: string): Promise<ApiResponse<Contact>> {
-    const response = await api.get<ApiResponse<Contact>>(`/tenants/${tenantId}/contacts/${contactId}`);
+  async create(tenantId: string, data: CreateContactRequest): Promise<Contact> {
+    const response = await api.post<Contact>(`/tenants/${tenantId}/contacts`, data);
     return response.data;
   },
 
-  // ── Get contact by phone number ──────────────────────────────────────────────
-  async getByPhone(tenantId: string, phone: string): Promise<ApiResponse<Contact>> {
-    const response = await api.get<ApiResponse<Contact>>(
-      `/tenants/${tenantId}/contacts/phone/${encodeURIComponent(phone)}`,
-    );
+  // ── Feature 2 ─────────────────────────────────────────────────────────────
+
+  async get(tenantId: string, contactId: string): Promise<ContactDetail> {
+    const response = await api.get<ContactDetail>(`/tenants/${tenantId}/contacts/${contactId}`);
     return response.data;
   },
 
-  // ── Create a new contact ─────────────────────────────────────────────────────
-  async create(tenantId: string, data: CreateContactRequest): Promise<ApiResponse<Contact>> {
-    const response = await api.post<ApiResponse<Contact>>(`/tenants/${tenantId}/contacts`, data);
+  async update(tenantId: string, contactId: string, data: UpdateContactRequest): Promise<ContactDetail> {
+    const response = await api.patch<ContactDetail>(`/tenants/${tenantId}/contacts/${contactId}`, data);
     return response.data;
   },
 
-  // ── Update a contact ─────────────────────────────────────────────────────────
-  async update(tenantId: string, contactId: string, data: UpdateContactRequest): Promise<ApiResponse<Contact>> {
-    const response = await api.patch<ApiResponse<Contact>>(`/tenants/${tenantId}/contacts/${contactId}`, data);
+  async addTag(tenantId: string, contactId: string, tag: string): Promise<ContactDetail> {
+    const response = await api.post<ContactDetail>(`/tenants/${tenantId}/contacts/${contactId}/tags`, { tag });
     return response.data;
   },
 
-  // ── Delete a contact ─────────────────────────────────────────────────────────
-  async delete(tenantId: string, contactId: string): Promise<ApiResponse<void>> {
-    const response = await api.delete<ApiResponse<void>>(`/tenants/${tenantId}/contacts/${contactId}`);
+  async removeTag(tenantId: string, contactId: string, tag: string): Promise<ContactDetail> {
+    const response = await api.delete<ContactDetail>(`/tenants/${tenantId}/contacts/${contactId}/tags/${tag}`);
     return response.data;
   },
 
-  // ── Bulk import contacts from CSV ────────────────────────────────────────────
-  // Expected CSV columns: phone (required), name, email, tags (comma-separated)
-  async importCsv(tenantId: string, file: File): Promise<ApiResponse<ContactImportResult>> {
-    const form = new FormData();
-    form.append('file', file);
-
-    const response = await api.post<ApiResponse<ContactImportResult>>(`/tenants/${tenantId}/contacts/import`, form, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
-    return response.data;
-  },
-
-  // ── Block / unblock a contact ────────────────────────────────────────────────
-  async setBlocked(tenantId: string, contactId: string, isBlocked: boolean): Promise<ApiResponse<Contact>> {
-    const response = await api.patch<ApiResponse<Contact>>(`/tenants/${tenantId}/contacts/${contactId}`, { isBlocked });
+  async remove(tenantId: string, contactId: string): Promise<{ success: boolean }> {
+    const response = await api.delete<{ success: boolean }>(`/tenants/${tenantId}/contacts/${contactId}`);
     return response.data;
   },
 };

@@ -1,12 +1,32 @@
-import { Injectable, ConflictException } from '@nestjs/common';
+﻿import {
+  Injectable,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ListContactsDto } from './dto/list-contacts.dto';
 import { CreateContactDto } from './dto/create-contact.dto';
+import { UpdateContactDto } from './dto/update-contact.dto';
+import { AddTagDto } from './dto/add-tag.dto';
 import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class ContactsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  // â”€â”€â”€ Shared: find or throw â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+  private async findContactOrThrow(tenantId: string, contactId: string) {
+    const contact = await this.prisma.contact.findFirst({
+      where: { id: contactId, tenantId, deletedAt: null },
+    });
+    if (!contact) {
+      throw new NotFoundException(`Contact ${contactId} not found`);
+    }
+    return contact;
+  }
+
+  // â”€â”€â”€ Feature 1 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   async listContacts(tenantId: string, dto: ListContactsDto) {
     const {
@@ -38,18 +58,11 @@ export class ContactsService {
     if (typeof isOptedOut === 'boolean') where.isOptedOut = isOptedOut;
 
     if (tags && tags.length > 0) {
-      where.tags = {
-        some: { tag: { in: tags } },
-      };
+      where.tags = { some: { tag: { in: tags } } };
     }
 
-    // lastMessageAt is on Conversation, not Contact — handle separately if sorted by it
     const orderBy: Prisma.ContactOrderByWithRelationInput =
-      sortBy === 'name'
-        ? { name: sortOrder }
-        : sortBy === 'createdAt'
-          ? { createdAt: sortOrder }
-          : { createdAt: sortOrder }; // fallback; lastMessageAt sort handled post-fetch if needed
+      sortBy === 'name' ? { name: sortOrder } : { createdAt: sortOrder };
 
     const [contacts, total] = await Promise.all([
       this.prisma.contact.findMany({
@@ -93,7 +106,6 @@ export class ContactsService {
       updatedAt: c.updatedAt,
     }));
 
-    // Optional in-memory sort by lastMessageAt (small page sizes make this acceptable)
     if (sortBy === 'lastMessageAt') {
       data.sort((a, b) => {
         const aTime = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0;
@@ -104,12 +116,7 @@ export class ContactsService {
 
     return {
       data,
-      meta: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-      },
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }
 
@@ -134,19 +141,113 @@ export class ContactsService {
         email: dto.email,
         notes: dto.notes,
         tags: dto.tags?.length
-          ? {
-              create: dto.tags.map((tag) => ({ tenantId, tag })),
-            }
+          ? { create: dto.tags.map((tag) => ({ tenantId, tag })) }
           : undefined,
       },
+      include: { tags: { select: { tag: true } } },
+    });
+
+    return { ...contact, tags: contact.tags.map((t) => t.tag) };
+  }
+
+  // â”€â”€â”€ Feature 2 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+  async getContact(tenantId: string, contactId: string) {
+    await this.findContactOrThrow(tenantId, contactId);
+
+    const contact = await this.prisma.contact.findFirst({
+      where: { id: contactId, tenantId, deletedAt: null },
       include: {
         tags: { select: { tag: true } },
+        conversations: {
+          select: {
+            id: true,
+            status: true,
+            lastMessageAt: true,
+            lastMessageText: true,
+            unreadCount: true,
+            createdAt: true,
+            session: { select: { id: true, name: true, phoneNumber: true } },
+          },
+          orderBy: { lastMessageAt: 'desc' },
+          take: 20,
+        },
+        _count: { select: { conversations: true } },
       },
     });
 
     return {
-      ...contact,
+      id: contact.id,
+      phoneNumber: contact.phoneNumber,
+      name: contact.name,
+      email: contact.email,
+      avatarUrl: contact.avatarUrl,
+      notes: contact.notes,
+      isBlocked: contact.isBlocked,
+      isOptedOut: contact.isOptedOut,
       tags: contact.tags.map((t) => t.tag),
+      conversationCount: contact._count.conversations,
+      conversations: contact.conversations,
+      createdAt: contact.createdAt,
+      updatedAt: contact.updatedAt,
     };
+  }
+
+  async updateContact(
+    tenantId: string,
+    contactId: string,
+    dto: UpdateContactDto,
+  ) {
+    await this.findContactOrThrow(tenantId, contactId);
+
+    const contact = await this.prisma.contact.update({
+      where: { id: contactId },
+      data: {
+        ...(dto.name !== undefined && { name: dto.name }),
+        ...(dto.email !== undefined && { email: dto.email }),
+        ...(dto.notes !== undefined && { notes: dto.notes }),
+        ...(dto.isBlocked !== undefined && { isBlocked: dto.isBlocked }),
+        ...(dto.isOptedOut !== undefined && { isOptedOut: dto.isOptedOut }),
+      },
+      include: { tags: { select: { tag: true } } },
+    });
+
+    return { ...contact, tags: contact.tags.map((t) => t.tag) };
+  }
+
+  async addTag(tenantId: string, contactId: string, dto: AddTagDto) {
+    await this.findContactOrThrow(tenantId, contactId);
+
+    // Upsert â€” safe to call even if tag already exists
+    await this.prisma.contactTag.upsert({
+      where: {
+        contactId_tag: { contactId, tag: dto.tag },
+      },
+      create: { contactId, tenantId, tag: dto.tag },
+      update: {},
+    });
+
+    return this.getContact(tenantId, contactId);
+  }
+
+  async removeTag(tenantId: string, contactId: string, tag: string) {
+    await this.findContactOrThrow(tenantId, contactId);
+
+    await this.prisma.contactTag.deleteMany({
+      where: { contactId, tag },
+    });
+
+    return this.getContact(tenantId, contactId);
+  }
+
+  async deleteContact(tenantId: string, contactId: string) {
+    await this.findContactOrThrow(tenantId, contactId);
+
+    await this.prisma.contact.update({
+      where: { id: contactId },
+      data: { deletedAt: new Date() },
+    });
+
+    return { success: true };
   }
 }
