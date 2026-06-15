@@ -29,4 +29,20 @@ export class GatewayService {
     if (!this.server) return;
     this.server.to(`tenant:${tenantId}`).emit('message:ack', payload);
   }
+
+  emitCampaignProgress(
+    tenantId: string,
+    payload: {
+      campaignId: string;
+      sentCount: number;
+      deliveredCount: number;
+      readCount: number;
+      failedCount: number;
+      totalContacts: number;
+      status: string;
+    },
+  ) {
+    if (!this.server) return;
+    this.server.to(`tenant:${tenantId}`).emit('campaign:progress', payload);
+  }
 }

@@ -8,6 +8,7 @@ import { join } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { ConfigService } from '@nestjs/config';
 import { ALLOWED_MIME_TYPES } from '../media/media.module';
+import { CampaignContactStatus } from '@prisma/client';
 
 @Processor('webhook-events')
 export class WebhooksProcessor extends WorkerHost {
@@ -120,6 +121,14 @@ export class WebhooksProcessor extends WorkerHost {
 
       const payload = data.payload ?? {};
       const fromNumber: string = payload.from ?? data.from ?? '';
+
+      // Skip WhatsApp Channel/Newsletter broadcasts — not a real contact conversation
+      if (fromNumber.endsWith('@newsletter')) {
+        this.logger.debug(
+          `message.received — skipping newsletter broadcast from ${fromNumber}`,
+        );
+        return;
+      }
       const rawType: string = payload.type?.toUpperCase() ?? 'TEXT';
 
       // ── Normalise message type to only accepted enum values ──
@@ -439,7 +448,7 @@ export class WebhooksProcessor extends WorkerHost {
     // ── Emit WebSocket event so frontend updates tick in real time ──
     const message = await this.prisma.message.findFirst({
       where: { externalId: data.payload.externalId },
-      select: { id: true, tenantId: true },
+      select: { id: true, tenantId: true, campaignId: true },
     });
 
     if (message) {
@@ -447,6 +456,49 @@ export class WebhooksProcessor extends WorkerHost {
         messageId: message.id,
         externalId: data.payload.externalId,
         status: ack.status,
+      });
+    }
+
+    if (message?.campaignId) {
+      await this.prisma.campaignContact.updateMany({
+        where: { campaignId: message.campaignId, messageId: message.id },
+        data: {
+          status: ack.status as CampaignContactStatus,
+          [ack.field]: new Date(data.timestamp),
+        },
+      });
+
+      const counterFieldMap: Record<string, string> = {
+        SENT: 'sentCount',
+        DELIVERED: 'deliveredCount',
+        READ: 'readCount',
+        FAILED: 'failedCount',
+      };
+      const counterField = counterFieldMap[ack.status];
+
+      const campaign = await this.prisma.campaign.update({
+        where: { id: message.campaignId },
+        data: { [counterField]: { increment: 1 } },
+        select: {
+          id: true,
+          tenantId: true,
+          sentCount: true,
+          deliveredCount: true,
+          readCount: true,
+          failedCount: true,
+          totalContacts: true,
+          status: true,
+        },
+      });
+
+      this.gatewayService.emitCampaignProgress(campaign.tenantId, {
+        campaignId: campaign.id,
+        sentCount: campaign.sentCount,
+        deliveredCount: campaign.deliveredCount,
+        readCount: campaign.readCount,
+        failedCount: campaign.failedCount,
+        totalContacts: campaign.totalContacts,
+        status: campaign.status,
       });
     }
 

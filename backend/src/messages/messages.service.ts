@@ -10,6 +10,7 @@ import { EngineRegistryService } from '../engine-registry/engine-registry.servic
 import { SendMessageDto } from './dto/send-message.dto';
 import { ListMessagesDto } from './dto/list-messages.dto';
 import axios from 'axios';
+import { EngineClientService } from '../engine-registry/engine-client.service';
 
 @Injectable()
 export class MessagesService {
@@ -18,6 +19,7 @@ export class MessagesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly engineRegistry: EngineRegistryService,
+    private readonly engineClient: EngineClientService,
     private readonly config: ConfigService,
   ) {}
 
@@ -73,7 +75,7 @@ export class MessagesService {
           to: dto.to,
           type: dto.type,
           text: dto.text,
-          mediaUrl: this.toEngineAccessibleUrl(dto.mediaUrl),
+          mediaUrl: this.engineClient.toEngineAccessibleUrl(dto.mediaUrl),
           caption: dto.caption,
           messageId: message.id,
         },
@@ -205,26 +207,6 @@ export class MessagesService {
         `Redis mapping missing for session ${sessionId}, falling back to DB instanceId`,
       );
       return this.engineRegistry.getInstanceById(fallbackInstanceId);
-    }
-  }
-
-  private toEngineAccessibleUrl(url?: string): string | undefined {
-    if (!url) return url;
-    const backendUrlForEngine =
-      this.config.get<string>('BACKEND_URL_FOR_ENGINE') ??
-      'http://172.31.112.1:3001';
-    try {
-      const parsed = new URL(url);
-      if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
-        const engineHost = new URL(backendUrlForEngine);
-        parsed.hostname = engineHost.hostname;
-        parsed.port = engineHost.port;
-        parsed.protocol = engineHost.protocol;
-        return parsed.toString();
-      }
-      return url;
-    } catch {
-      return url;
     }
   }
 }

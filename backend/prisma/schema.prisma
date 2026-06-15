@@ -426,7 +426,7 @@ model CampaignContact {
   campaignId   String                @db.Uuid
   contactId    String?               @db.Uuid
   tenantId     String                @db.Uuid
-  phoneNumber  String                @db.VarChar(20)
+  phoneNumber  String                @db.VarChar(50)
   status       CampaignContactStatus @default(PENDING)
   messageId    String?               @db.Uuid
   retryCount   Int                   @default(0)

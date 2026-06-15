@@ -19,6 +19,7 @@ import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
 import { MediaModule } from './media/media.module';
 import { ContactsModule } from './contacts/contacts.module';
+import { CampaignsModule } from './campaigns/campaigns.module';
 
 @Module({
   imports: [
@@ -52,7 +53,8 @@ import { ContactsModule } from './contacts/contacts.module';
     MessagesModule,
     ConversationsModule,
     ContactsModule,
-    GatewayModule,
+    ContactsModule,
+    CampaignsModule,
     GatewayModule,
     HealthModule,
     // Add after HealthModule in the imports array
