@@ -22,11 +22,7 @@ async function bootstrap() {
 
   // ── CORS — must specify exact origin when withCredentials: true ──
   app.enableCors({
-    origin: [
-      'http://localhost:3000',
-      'http://192.168.1.4:3000',
-      'http://192.168.1.5:3000',
-    ],
+    origin: process.env.CORS_ORIGINS?.split(',') ?? ['http://localhost:3000'],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
