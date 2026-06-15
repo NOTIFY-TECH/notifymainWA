@@ -115,4 +115,25 @@ export const contactsApi = {
     const response = await api.delete<{ success: boolean }>(`/tenants/${tenantId}/contacts/${contactId}`);
     return response.data;
   },
+
+  // ── Feature 4 ─────────────────────────────────────────────────────────────
+
+  async createFromConversation(tenantId: string, conversationId: string): Promise<Contact> {
+    const response = await api.post<Contact>(`/tenants/${tenantId}/contacts/from-conversation/${conversationId}`);
+    return response.data;
+  },
+
+  // ── Feature 3 ─────────────────────────────────────────────────────────────
+
+  async import(
+    tenantId: string,
+    file: File,
+  ): Promise<{ created: number; updated: number; skipped: number; errors: { row: number; reason: string }[] }> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await api.post(`/tenants/${tenantId}/contacts/import`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  },
 };

@@ -6,10 +6,11 @@ import { useContacts } from '@/hooks/useContacts';
 import { ListContactsParams } from '@/services/contacts-api';
 import ContactList from '@/components/contacts/ContactList';
 import AddContactModal from '@/components/contacts/AddContactModal';
+import ImportContactsModal from '@/components/contacts/ImportContactsModal';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Search, Plus, X } from 'lucide-react';
-import { useDebounce } from '@/hooks/useDebounce'; // reuse if you have it, else see note below
+import { Search, Plus, Upload, X } from 'lucide-react';
+import { useDebounce } from '@/hooks/useDebounce';
 
 // ─── Tag filter chip ──────────────────────────────────────────────────────────
 
@@ -37,12 +38,11 @@ function TagChip({ label, active, onClick }: { label: string; active: boolean; o
 export default function ContactsPage() {
   const router = useRouter();
   const [addOpen, setAddOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [activeTags, setActiveTags] = useState<string[]>([]);
   const [page, setPage] = useState(1);
 
-  // Debounce search so we don't fire on every keystroke
-  // If you don't have useDebounce, replace debouncedSearch with search directly
   const debouncedSearch = useDebounce(search, 300);
 
   const filters: ListContactsParams = {
@@ -85,14 +85,25 @@ export default function ContactsPage() {
             </p>
           )}
         </div>
-        <Button
-          size="sm"
-          onClick={() => setAddOpen(true)}
-          className="inline-flex items-center gap-2 bg-[#22C55E]/20 border border-[#22C55E]/30 text-[hsl(var(--green))] hover:bg-[#22C55E]/30"
-        >
-          <Plus className="w-4 h-4" />
-          Add contact
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setImportOpen(true)}
+            className="inline-flex items-center gap-2"
+          >
+            <Upload className="w-4 h-4" />
+            Import CSV
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => setAddOpen(true)}
+            className="inline-flex items-center gap-2 bg-[#22C55E]/20 border border-[#22C55E]/30 text-[hsl(var(--green))] hover:bg-[#22C55E]/30"
+          >
+            <Plus className="w-4 h-4" />
+            Add contact
+          </Button>
+        </div>
       </div>
 
       {/* Search + tag filters */}
@@ -139,8 +150,9 @@ export default function ContactsPage() {
         </div>
       )}
 
-      {/* Modal */}
+      {/* Modals */}
       <AddContactModal open={addOpen} onClose={() => setAddOpen(false)} />
+      <ImportContactsModal open={importOpen} onClose={() => setImportOpen(false)} />
     </div>
   );
 }

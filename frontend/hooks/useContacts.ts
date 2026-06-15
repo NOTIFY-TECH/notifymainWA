@@ -75,9 +75,7 @@ export function useUpdateContact(contactId: string) {
   return useMutation({
     mutationFn: (data: UpdateContactRequest) => contactsApi.update(tenantId, contactId, data),
     onSuccess: (updated: ContactDetail) => {
-      // Update detail cache immediately
       queryClient.setQueryData(contactKeys.detail(tenantId, contactId), updated);
-      // Invalidate list so name/email changes reflect there too
       queryClient.invalidateQueries({ queryKey: contactKeys.list(tenantId) });
     },
   });
@@ -116,9 +114,7 @@ export function useDeleteContact() {
   return useMutation({
     mutationFn: (contactId: string) => contactsApi.remove(tenantId, contactId),
     onSuccess: (_, contactId) => {
-      // Remove from detail cache
       queryClient.removeQueries({ queryKey: contactKeys.detail(tenantId, contactId) });
-      // Remove from list cache optimistically
       queryClient.setQueriesData<PaginatedResponse<Contact>>({ queryKey: contactKeys.list(tenantId) }, old => {
         if (!old) return old;
         return {
@@ -128,6 +124,34 @@ export function useDeleteContact() {
         };
       });
       router.push('/dashboard/contacts');
+    },
+  });
+}
+// ─── useCreateContactFromConversation ─────────────────────────────────────────
+
+export function useCreateContactFromConversation() {
+  const tenantId = useAuthStore.getState().tenant?.id ?? '';
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (conversationId: string) => contactsApi.createFromConversation(tenantId, conversationId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: contactKeys.all(tenantId) });
+      queryClient.invalidateQueries({ queryKey: ['conversations', tenantId] });
+    },
+  });
+}
+
+// ─── useImportContacts ────────────────────────────────────────────────────────
+
+export function useImportContacts() {
+  const tenantId = useAuthStore.getState().tenant?.id ?? '';
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (file: File) => contactsApi.import(tenantId, file),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: contactKeys.all(tenantId) });
     },
   });
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import {
   useMessages,
   useMarkAsRead,
@@ -11,13 +11,13 @@ import {
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/store/authStore';
+import { useCreateContactFromConversation } from '@/hooks/useContacts';
 import MessageBubble from './MessageBubble';
 import SendMessageForm from './SendMessageForm';
 import { Message } from '@/types/message';
 import { InfiniteData } from '@tanstack/react-query';
 import { CursorPaginatedResponse } from '@/types/index';
-import { Loader2, ArrowLeft, MoreVertical } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { Loader2, ArrowLeft, UserPlus, Check } from 'lucide-react';
 
 interface ThreadViewProps {
   conversationId: string;
@@ -30,6 +30,7 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const isFirstLoad = useRef(true);
+  const [savedContact, setSavedContact] = useState(false);
 
   const { subscribe, unsubscribe } = useWebSocket();
   const { data: conversation } = useConversation(conversationId);
@@ -38,6 +39,7 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
 
   const markAsRead = useMarkAsRead();
   const sendMessage = useSendMessage(conversationId);
+  const saveAsContact = useCreateContactFromConversation();
 
   // ── Mark as read when conversation opens ──────────────────────────────────
   useEffect(() => {
@@ -45,6 +47,11 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
       markAsRead.mutate(conversationId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId]);
+
+  // ── Reset savedContact state when conversation changes ────────────────────
+  useEffect(() => {
+    setSavedContact(false);
   }, [conversationId]);
 
   // ── Scroll to bottom on first load only ───────────────────────────────────
@@ -61,11 +68,8 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
   useEffect(() => {
     const prev = prevLengthRef.current;
     const curr = messages.length;
-    // Only scroll if messages were appended at the end (new message)
-    // not when older messages were prepended (load older)
     if (curr > prev && !isFirstLoad.current) {
       const lastMsg = messages[curr - 1];
-      // Scroll only if it's a new message (within last 5s) or outbound
       const isNew =
         lastMsg && (lastMsg.direction === 'OUTBOUND' || Date.now() - new Date(lastMsg.createdAt).getTime() < 5000);
       if (isNew) {
@@ -183,7 +187,6 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
     const el = scrollRef.current;
     const prevScrollHeight = el?.scrollHeight ?? 0;
     await fetchOlderMessages();
-    // After older messages prepend, restore scroll position
     requestAnimationFrame(() => {
       if (el) {
         el.scrollTop += el.scrollHeight - prevScrollHeight;
@@ -191,7 +194,15 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
     });
   }, [fetchOlderMessages]);
 
+  // ── Save as contact handler ───────────────────────────────────────────────
+  const handleSaveAsContact = useCallback(() => {
+    saveAsContact.mutate(conversationId, {
+      onSuccess: () => setSavedContact(true),
+    });
+  }, [conversationId, saveAsContact]);
+
   const displayName = conversation?.contact?.name ?? conversation?.contactName ?? conversation?.phoneNumber;
+  const hasContact = !!conversation?.contactId || savedContact;
 
   return (
     <div className="flex flex-col h-full">
@@ -218,14 +229,28 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
           )}
         </div>
 
-        <button className="p-2 rounded-lg hover:bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] transition-colors">
-          <MoreVertical size={16} />
-        </button>
+        {/* Save as Contact — only shown when no contact is linked */}
+        {!hasContact && (
+          <button
+            onClick={handleSaveAsContact}
+            disabled={saveAsContact.isPending}
+            title="Save as contact"
+            className="p-2 rounded-lg hover:bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--green))] transition-colors disabled:opacity-50"
+          >
+            {saveAsContact.isPending ? <Loader2 size={16} className="animate-spin" /> : <UserPlus size={16} />}
+          </button>
+        )}
+
+        {/* Saved confirmation — briefly shown after saving */}
+        {hasContact && savedContact && (
+          <div className="p-2 text-[hsl(var(--green))]" title="Contact saved">
+            <Check size={16} />
+          </div>
+        )}
       </div>
 
       {/* ── Messages ── */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
-        {/* Load older button */}
         {hasOlderMessages && (
           <div className="flex justify-center pb-2">
             <button
@@ -244,7 +269,6 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
           </div>
         )}
 
-        {/* Loading skeleton */}
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 size={20} className="animate-spin text-[hsl(var(--muted-foreground))]" />

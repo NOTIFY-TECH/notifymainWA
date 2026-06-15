@@ -259,7 +259,7 @@ model Session {
 model Contact {
   id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenantId    String    @db.Uuid
-  phoneNumber String    @db.VarChar(20)
+  phoneNumber String    @db.VarChar(50)
   name        String    @db.VarChar(100)  
   email       String?   @db.VarChar(255)
   avatarUrl   String?   @db.VarChar(500)

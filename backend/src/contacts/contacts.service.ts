@@ -9,12 +9,17 @@ import { CreateContactDto } from './dto/create-contact.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
 import { AddTagDto } from './dto/add-tag.dto';
 import { Prisma } from '@prisma/client';
+import { parse } from 'csv-parse/sync';
+import {
+  ImportContactRow,
+  ImportContactsResult,
+} from './dto/import-contacts.dto';
 
 @Injectable()
 export class ContactsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  // â”€â”€â”€ Shared: find or throw â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Shared: find or throw ──────────────────────────────────────────────────
 
   private async findContactOrThrow(tenantId: string, contactId: string) {
     const contact = await this.prisma.contact.findFirst({
@@ -26,7 +31,7 @@ export class ContactsService {
     return contact;
   }
 
-  // â”€â”€â”€ Feature 1 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Feature 1 ──────────────────────────────────────────────────────────────
 
   async listContacts(tenantId: string, dto: ListContactsDto) {
     const {
@@ -150,7 +155,7 @@ export class ContactsService {
     return { ...contact, tags: contact.tags.map((t) => t.tag) };
   }
 
-  // â”€â”€â”€ Feature 2 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Feature 2 ──────────────────────────────────────────────────────────────
 
   async getContact(tenantId: string, contactId: string) {
     await this.findContactOrThrow(tenantId, contactId);
@@ -218,11 +223,8 @@ export class ContactsService {
   async addTag(tenantId: string, contactId: string, dto: AddTagDto) {
     await this.findContactOrThrow(tenantId, contactId);
 
-    // Upsert â€” safe to call even if tag already exists
     await this.prisma.contactTag.upsert({
-      where: {
-        contactId_tag: { contactId, tag: dto.tag },
-      },
+      where: { contactId_tag: { contactId, tag: dto.tag } },
       create: { contactId, tenantId, tag: dto.tag },
       update: {},
     });
@@ -249,5 +251,137 @@ export class ContactsService {
     });
 
     return { success: true };
+  }
+
+  // ─── Feature 4 ──────────────────────────────────────────────────────────────
+
+  async createFromConversation(tenantId: string, conversationId: string) {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, tenantId },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException(`Conversation ${conversationId} not found`);
+    }
+
+    if (conversation.contactId) {
+      throw new ConflictException(
+        'This conversation already has a linked contact',
+      );
+    }
+
+    const phoneNumber = conversation.phoneNumber;
+
+    // Link existing contact if one already exists for this phone
+    const existing = await this.prisma.contact.findFirst({
+      where: { tenantId, phoneNumber, deletedAt: null },
+    });
+
+    let contact;
+    if (existing) {
+      contact = existing;
+    } else {
+      contact = await this.prisma.contact.create({
+        data: { tenantId, phoneNumber, name: phoneNumber },
+      });
+    }
+
+    await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: { contactId: contact.id },
+    });
+
+    return { ...contact, tags: [] };
+  }
+
+  // ─── Feature 3 ──────────────────────────────────────────────────────────────
+
+  async importContacts(
+    tenantId: string,
+    fileBuffer: Buffer,
+  ): Promise<ImportContactsResult> {
+    const rows = parse(fileBuffer, {
+      columns: true,
+      skip_empty_lines: true,
+      trim: true,
+      relax_column_count: true,
+    });
+
+    const result: ImportContactsResult = {
+      created: 0,
+      updated: 0,
+      skipped: 0,
+      errors: [],
+    };
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i] as ImportContactRow;
+      const rowNum = i + 2;
+
+      if (!row.phoneNumber) {
+        result.errors.push({ row: rowNum, reason: 'Missing phoneNumber' });
+        result.skipped++;
+        continue;
+      }
+
+      if (!row.name) {
+        result.errors.push({ row: rowNum, reason: 'Missing name' });
+        result.skipped++;
+        continue;
+      }
+
+      const tags = row.tags
+        ? row.tags
+            .split(',')
+            .map((t: string) => t.trim())
+            .filter(Boolean)
+        : [];
+
+      try {
+        const existing = await this.prisma.contact.findFirst({
+          where: { tenantId, phoneNumber: row.phoneNumber },
+        });
+
+        if (existing) {
+          await this.prisma.contact.update({
+            where: { id: existing.id },
+            data: {
+              name: row.name,
+              ...(row.email !== undefined && { email: row.email }),
+              deletedAt: null,
+            },
+          });
+
+          for (const tag of tags) {
+            await this.prisma.contactTag.upsert({
+              where: { contactId_tag: { contactId: existing.id, tag } },
+              create: { contactId: existing.id, tenantId, tag },
+              update: {},
+            });
+          }
+
+          result.updated++;
+        } else {
+          await this.prisma.contact.create({
+            data: {
+              tenantId,
+              phoneNumber: row.phoneNumber,
+              name: row.name,
+              ...(row.email && { email: row.email }),
+              tags: tags.length
+                ? { create: tags.map((tag: string) => ({ tenantId, tag })) }
+                : undefined,
+            },
+          });
+
+          result.created++;
+        }
+      } catch (err: any) {
+        result.errors.push({ row: rowNum, reason: String(err.message) });
+        result.skipped++;
+      }
+    }
+
+    return result;
   }
 }
