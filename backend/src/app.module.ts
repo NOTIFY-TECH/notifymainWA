@@ -53,7 +53,6 @@ import { CampaignsModule } from './campaigns/campaigns.module';
     MessagesModule,
     ConversationsModule,
     ContactsModule,
-    ContactsModule,
     CampaignsModule,
     GatewayModule,
     HealthModule,
