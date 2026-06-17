@@ -129,6 +129,59 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
     [conversationId, tenantId, queryClient, conversation?.sessionId],
   );
 
+  const handleOutgoingSynced = useCallback(
+    (event: {
+      conversationId: string;
+      messageId: string;
+      to: string;
+      body: string;
+      type: string;
+      mediaUrl?: string;
+      mediaType?: string;
+      createdAt: string;
+    }) => {
+      if (event.conversationId !== conversationId) return;
+
+      const newMessage: Message = {
+        id: event.messageId,
+        conversationId: event.conversationId,
+        direction: 'OUTBOUND',
+        type: event.type.toUpperCase() as Message['type'],
+        body: event.body,
+        mediaUrl: event.mediaUrl,
+        mediaType: event.mediaType,
+        fromNumber: '',
+        toNumber: event.to,
+        status: 'SENT',
+        createdAt: event.createdAt,
+        updatedAt: event.createdAt,
+        tenantId,
+        sessionId: conversation?.sessionId ?? '',
+      };
+
+      queryClient.setQueryData(
+        conversationKeys.messages(tenantId, conversationId),
+        (old: InfiniteData<CursorPaginatedResponse<Message>> | undefined) => {
+          if (!old) return old;
+          const lastPage = old.pages[old.pages.length - 1];
+          // Avoid duplicate if this message ID is already in cache
+          const alreadyExists = old.pages.some(p => p.data.some(m => m.id === newMessage.id));
+          if (alreadyExists) return old;
+          return {
+            ...old,
+            pages: [...old.pages.slice(0, -1), { ...lastPage, data: [...lastPage.data, newMessage] }],
+          };
+        },
+      );
+    },
+    [conversationId, tenantId, queryClient, conversation?.sessionId],
+  );
+
+  useEffect(() => {
+    subscribe('message:outgoing_synced', handleOutgoingSynced);
+    return () => unsubscribe('message:outgoing_synced', handleOutgoingSynced);
+  }, [subscribe, unsubscribe, handleOutgoingSynced]);
+
   useEffect(() => {
     subscribe('message:received', handleIncoming);
     return () => unsubscribe('message:received', handleIncoming);

@@ -1,84 +1,84 @@
 'use client';
 
-import { CampaignContact, CampaignContactStatus } from '@/types/campaign';
+import { CampaignContact } from '@/types/campaign';
+import { format } from 'date-fns';
+import { cn } from '@/lib/utils';
+import { Check, CheckCheck, Clock, AlertCircle, Ban } from 'lucide-react';
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 
-interface Props {
+interface CampaignContactTableProps {
   contacts: CampaignContact[];
 }
 
-function formatTime(iso: string | null) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+function StatusIcon({ status }: { status: CampaignContact['status'] }) {
+  switch (status) {
+    case 'PENDING':
+      return <Clock size={13} className="text-[hsl(var(--muted-foreground))]" />;
+    case 'SENT':
+      return <Check size={13} className="text-[hsl(var(--muted-foreground))]" />;
+    case 'DELIVERED':
+      return <CheckCheck size={13} className="text-[hsl(var(--green))]" />;
+    case 'READ':
+      return <CheckCheck size={13} className="text-blue-400" />;
+    case 'FAILED':
+      return <AlertCircle size={13} className="text-red-400" />;
+    case 'OPTED_OUT':
+      return <Ban size={13} className="text-[hsl(var(--muted-foreground))]" />;
+    default:
+      return null;
+  }
 }
 
-function StatusBadge({ status }: { status: CampaignContactStatus }) {
-  const map: Record<CampaignContactStatus, { label: string; className: string }> = {
-    PENDING: { label: 'Pending', className: 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]' },
-    SENT: { label: 'Sent', className: 'bg-blue-400/10 text-blue-400' },
-    DELIVERED: { label: 'Delivered', className: 'bg-[#22C55E]/10 text-[hsl(var(--green))]' },
-    READ: { label: 'Read', className: 'bg-[#22C55E]/20 text-[hsl(var(--green))] font-semibold' },
-    FAILED: { label: 'Failed', className: 'bg-red-400/10 text-red-400' },
-    OPTED_OUT: { label: 'Opted out', className: 'bg-yellow-400/10 text-yellow-500' },
-  };
-  const { label, className } = map[status] ?? map.PENDING;
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] ${className}`}>{label}</span>;
+function timestampFor(contact: CampaignContact): string | null {
+  return contact.readAt ?? contact.deliveredAt ?? contact.sentAt ?? contact.failedAt ?? null;
 }
 
-// Resolve the most relevant timestamp for a contact
-function resolvedTimestamp(c: CampaignContact): string {
-  return formatTime(c.readAt ?? c.deliveredAt ?? c.sentAt ?? c.failedAt);
-}
-
-export default function CampaignContactsTable({ contacts }: Props) {
+export default function CampaignContactTable({ contacts }: CampaignContactTableProps) {
   if (contacts.length === 0) {
-    return (
-      <div className="rounded-xl border border-[hsl(var(--border))] px-5 py-10 text-center">
-        <p className="text-xs text-[hsl(var(--muted-foreground))]">No contacts attached to this campaign.</p>
-      </div>
-    );
+    return <p className="text-xs text-[hsl(var(--muted-foreground))] py-4">No recipients</p>;
   }
 
   return (
-    <div className="rounded-xl border border-[hsl(var(--border))] overflow-hidden">
-      <div className="px-5 py-3 border-b border-[hsl(var(--border))]">
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-[hsl(var(--muted-foreground))]">
-          Recipients · {contacts.length}
-        </p>
-      </div>
-
-      <div className="divide-y divide-[hsl(var(--border))]">
-        {contacts.map(c => (
-          <div key={c.id} className="flex items-center gap-3 px-5 py-2.5">
-            {/* Avatar */}
-            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[hsl(var(--muted))] text-xs font-semibold uppercase text-[hsl(var(--foreground))]">
-              {c.phoneNumber.slice(-2)}
-            </div>
-
-            {/* Phone */}
-            <p className="text-xs font-medium text-[hsl(var(--foreground))] flex-1 truncate">{c.phoneNumber}</p>
-
-            {/* Retry count (only if > 0) */}
-            {c.retryCount > 0 && (
-              <span className="text-[11px] text-[hsl(var(--muted-foreground))]">×{c.retryCount}</span>
-            )}
-
-            {/* Error message tooltip-style */}
-            {c.errorMessage && (
-              <span title={c.errorMessage} className="text-[11px] text-red-400 max-w-[120px] truncate">
-                {c.errorMessage}
-              </span>
-            )}
-
-            {/* Timestamp */}
-            <span className="text-[11px] text-[hsl(var(--muted-foreground))] shrink-0 w-14 text-right">
-              {resolvedTimestamp(c)}
-            </span>
-
-            {/* Status badge */}
-            <StatusBadge status={c.status} />
-          </div>
-        ))}
-      </div>
+    <div className="rounded-lg border border-[hsl(var(--border))] overflow-hidden">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="text-[11px] text-[hsl(var(--muted-foreground))]">Phone</TableHead>
+            <TableHead className="text-[11px] text-[hsl(var(--muted-foreground))]">Status</TableHead>
+            <TableHead className="text-[11px] text-[hsl(var(--muted-foreground))]">Updated</TableHead>
+            <TableHead className="text-[11px] text-[hsl(var(--muted-foreground))]">Error</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {contacts.map(contact => {
+            const ts = timestampFor(contact);
+            return (
+              <TableRow key={contact.id}>
+                <TableCell className="text-[hsl(var(--foreground))]">{contact.phoneNumber}</TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-1.5">
+                    <StatusIcon status={contact.status} />
+                    <span
+                      className={cn(
+                        'text-xs',
+                        contact.status === 'FAILED' ? 'text-red-400' : 'text-[hsl(var(--muted-foreground))]',
+                      )}
+                    >
+                      {contact.status.charAt(0) + contact.status.slice(1).toLowerCase()}
+                    </span>
+                  </div>
+                </TableCell>
+                <TableCell className="text-xs text-[hsl(var(--muted-foreground))]">
+                  {ts ? format(new Date(ts), 'MMM d, HH:mm') : '—'}
+                </TableCell>
+                <TableCell className="text-xs text-red-400 max-w-[200px] truncate whitespace-normal">
+                  {contact.errorMessage ?? ''}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
     </div>
   );
 }

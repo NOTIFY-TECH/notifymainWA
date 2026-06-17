@@ -70,7 +70,7 @@ export function useCampaign(campaignId: string | null) {
       });
 
       // Also patch the list view, if cached
-      queryClient.setQueriesData<PaginatedResponse<Campaign>>({ queryKey: campaignKeys.all(tenantId) }, old => {
+      queryClient.setQueriesData<PaginatedResponse<Campaign>>({ queryKey: ['campaigns', tenantId, 'list'] }, old => {
         if (!old?.data) return old;
         return {
           ...old,
@@ -107,6 +107,36 @@ export function useCreateCampaign() {
     mutationFn: (data: CreateCampaignRequest) => campaignsApi.create(tenantId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: campaignKeys.all(tenantId) });
+    },
+  });
+}
+
+// ─── useUploadCampaignRecipients ──────────────────────────────────────────────
+//
+// Separate mutation from useCreateCampaign — kept distinct because:
+// (a) it runs after creation with a known campaignId,
+// (b) its onSuccess scope is narrower (only the detail cache needs refreshing,
+//     not the full list — totalContacts on the list card will update via the
+//     detail invalidation cascading through the shared cache key prefix).
+//
+// The campaignId is passed at call time (mutateAsync(file)), not at hook
+// instantiation, because the ID isn't known until createCampaign resolves.
+// We thread it in via a wrapper object to keep mutateAsync's call signature
+// explicit and avoid closure-captured state going stale between the two steps.
+
+export function useUploadCampaignRecipients() {
+  const tenantId = useAuthStore.getState().tenant?.id ?? '';
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ campaignId, file }: { campaignId: string; file: File }) =>
+      campaignsApi.uploadRecipientsCsv(tenantId, campaignId, file),
+    onSuccess: (_result, { campaignId }) => {
+      // Invalidate the detail query so totalContacts reflects the newly added rows.
+      // The list view will pick up the updated count on next navigation/refetch.
+      queryClient.invalidateQueries({
+        queryKey: campaignKeys.detail(tenantId, campaignId),
+      });
     },
   });
 }

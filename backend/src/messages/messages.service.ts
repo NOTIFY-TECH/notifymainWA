@@ -11,6 +11,7 @@ import { SendMessageDto } from './dto/send-message.dto';
 import { ListMessagesDto } from './dto/list-messages.dto';
 import axios from 'axios';
 import { EngineClientService } from '../engine-registry/engine-client.service';
+import { normalisePhone } from '../common/utils/phone.util';
 
 @Injectable()
 export class MessagesService {
@@ -41,7 +42,7 @@ export class MessagesService {
       );
     }
 
-    // 2. Resolve engine via Redis â†’ DB fallback
+    // 2. Resolve engine via Redis -> DB fallback
     const engine = await this.resolveEngine(
       dto.sessionId,
       session.engineInstanceId,
@@ -52,12 +53,12 @@ export class MessagesService {
       data: {
         tenantId,
         sessionId: session.id,
-        conversationId: dto.conversationId ?? null, // add this line
+        conversationId: dto.conversationId ?? null,
         direction: 'OUTBOUND',
         fromNumber: session.phoneNumber ?? '',
         toNumber: dto.to,
         type: dto.type.toUpperCase() as any,
-        body: dto.text, // dto.text not dto.body
+        body: dto.text,
         mediaUrl: dto.mediaUrl,
         mediaType: dto.mediaType,
         caption: dto.caption,
@@ -65,14 +66,41 @@ export class MessagesService {
       },
     });
 
-    // 4. Forward to engine
+    // 4. Determine what address to send to.
+    // dto.to may be:
+    //   - a full JID with a suffix already present, e.g.
+    //     "919876543210@s.whatsapp.net" or "182089584488685@lid".
+    //     These are passed through to the engine UNCHANGED. Baileys v7
+    //     addresses LID and phone-number JIDs natively -- stripping the
+    //     suffix and re-deriving "@s.whatsapp.net" from LID digits produces
+    //     an address that does not correspond to any real WhatsApp account,
+    //     which is why messages silently failed to deliver.
+    //   - bare digits with no "@" at all (CSV imports, campaigns, manual
+    //     contact entry) -- these ARE real phone numbers and get normalised.
+    let addressToSend: string;
+    if (typeof dto.to === 'string' && dto.to.includes('@')) {
+      addressToSend = dto.to;
+    } else {
+      const normaliseResult = normalisePhone(dto.to);
+      if (!normaliseResult.valid) {
+        throw new BadRequestException(
+          `Invalid recipient number: ${normaliseResult.reason}`,
+        );
+      }
+      addressToSend = normaliseResult.normalised;
+    }
+    this.logger.debug(
+      `dto.to raw: "${dto.to}" -> addressToSend: "${addressToSend}"`,
+    );
+
+    // 5. Forward to engine
     try {
       this.logger.debug(`Sending with API key: ${JSON.stringify(apiKey)}`);
       const response = await axios.post(
         `${engine.url}/api/messages/send`,
         {
           sessionId: session.openwaId,
-          to: dto.to,
+          to: addressToSend,
           type: dto.type,
           text: dto.text,
           mediaUrl: this.engineClient.toEngineAccessibleUrl(dto.mediaUrl),
@@ -82,7 +110,7 @@ export class MessagesService {
         { headers: { 'X-API-Key': apiKey } },
       );
 
-      // 5. Update status to SENT
+      // 6. Update status to SENT
       await this.prisma.message.update({
         where: { id: message.id },
         data: {
@@ -117,7 +145,7 @@ export class MessagesService {
           `Engine response: ${JSON.stringify(error.response?.data)}`,
         );
       }
-      // 6. Mark as FAILED if engine call fails
+      // 7. Mark as FAILED if engine call fails
       await this.prisma.message.update({
         where: { id: message.id },
         data: { status: 'FAILED', failedAt: new Date() },

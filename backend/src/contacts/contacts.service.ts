@@ -14,6 +14,7 @@ import {
   ImportContactRow,
   ImportContactsResult,
 } from './dto/import-contacts.dto';
+import { normalisePhone } from '../common/utils/phone.util';
 
 @Injectable()
 export class ContactsService {
@@ -126,6 +127,8 @@ export class ContactsService {
   }
 
   async createContact(tenantId: string, dto: CreateContactDto) {
+    // phoneNumber is already normalised by @Transform in CreateContactDto
+    // and validated by @Matches — no further normalisation needed here.
     const existing = await this.prisma.contact.findUnique({
       where: {
         tenantId_phoneNumber: { tenantId, phoneNumber: dto.phoneNumber },
@@ -272,7 +275,6 @@ export class ContactsService {
 
     const phoneNumber = conversation.phoneNumber;
 
-    // Link existing contact if one already exists for this phone
     const existing = await this.prisma.contact.findFirst({
       where: { tenantId, phoneNumber, deletedAt: null },
     });
@@ -330,6 +332,18 @@ export class ContactsService {
         continue;
       }
 
+      // ── Normalise phone number ──────────────────────────────────────────────
+      const phoneResult = normalisePhone(row.phoneNumber);
+      if (!phoneResult.valid) {
+        result.errors.push({
+          row: rowNum,
+          reason: `Invalid phoneNumber: ${phoneResult.reason}`,
+        });
+        result.skipped++;
+        continue;
+      }
+      const phoneNumber = phoneResult.normalised;
+
       const tags = row.tags
         ? row.tags
             .split(',')
@@ -339,7 +353,7 @@ export class ContactsService {
 
       try {
         const existing = await this.prisma.contact.findFirst({
-          where: { tenantId, phoneNumber: row.phoneNumber },
+          where: { tenantId, phoneNumber },
         });
 
         if (existing) {
@@ -365,7 +379,7 @@ export class ContactsService {
           await this.prisma.contact.create({
             data: {
               tenantId,
-              phoneNumber: row.phoneNumber,
+              phoneNumber,
               name: row.name,
               ...(row.email && { email: row.email }),
               tags: tags.length

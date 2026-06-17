@@ -72,3 +72,18 @@ export interface CampaignProgressEvent {
   totalContacts: number;
   status: CampaignStatus;
 }
+
+// ─── CSV recipient import ─────────────────────────────────────────────────────
+
+export interface RecipientImportError {
+  row: number;
+  reason: string;
+}
+
+// Return shape from POST .../recipients/csv
+// Returned directly (no ApiResponse wrapper) — matches backend ImportRecipientsResult
+export interface ImportRecipientsResult {
+  created: number;
+  skipped: number;
+  errors: RecipientImportError[];
+}

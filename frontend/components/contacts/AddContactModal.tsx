@@ -15,6 +15,44 @@ interface AddContactModalProps {
 
 const EMPTY = { name: '', phoneNumber: '', email: '', notes: '', tags: '' };
 
+// ─── Client-side phone normalisation ─────────────────────────────────────────
+// Mirrors the backend phone.util.ts logic so the user sees an error instantly
+// without a round-trip. The backend still validates — this is UX, not security.
+
+function normalisePhone(raw: string): { normalised: string; error: string | null } {
+  let digits = raw.trim();
+
+  if (!digits) return { normalised: '', error: 'Phone number is required.' };
+
+  if (digits.startsWith('00')) digits = digits.slice(2);
+  if (digits.startsWith('+')) digits = digits.slice(1);
+  digits = digits.replace(/\D/g, '');
+
+  if (digits.length === 0) {
+    return { normalised: '', error: 'Phone number contains no digits.' };
+  }
+
+  if (digits.length === 10) {
+    if (digits.startsWith('0')) {
+      return {
+        normalised: '',
+        error: 'A 10-digit number starting with 0 is not a valid Indian mobile number.',
+      };
+    }
+    digits = '91' + digits;
+  }
+
+  if (digits.length < 10) {
+    return { normalised: '', error: `Phone number too short (${digits.length} digits).` };
+  }
+
+  if (digits.length > 15) {
+    return { normalised: '', error: `Phone number too long (${digits.length} digits).` };
+  }
+
+  return { normalised: digits, error: null };
+}
+
 export default function AddContactModal({ open, onClose }: AddContactModalProps) {
   const [form, setForm] = useState(EMPTY);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +65,9 @@ export default function AddContactModal({ open, onClose }: AddContactModalProps)
     setError(null);
 
     if (!form.name.trim()) return setError('Name is required.');
-    if (!form.phoneNumber.trim()) return setError('Phone number is required.');
+
+    const { normalised, error: phoneError } = normalisePhone(form.phoneNumber);
+    if (phoneError) return setError(phoneError);
 
     const tags = form.tags
       .split(',')
@@ -37,7 +77,7 @@ export default function AddContactModal({ open, onClose }: AddContactModalProps)
     try {
       await mutateAsync({
         name: form.name.trim(),
-        phoneNumber: form.phoneNumber.trim(),
+        phoneNumber: normalised, // send normalised value; backend will also normalise via @Transform
         email: form.email.trim() || undefined,
         notes: form.notes.trim() || undefined,
         tags: tags.length > 0 ? tags : undefined,
@@ -49,7 +89,13 @@ export default function AddContactModal({ open, onClose }: AddContactModalProps)
         err instanceof Error && 'response' in err
           ? (err as { response?: { data?: { message?: unknown } } }).response?.data?.message
           : undefined;
-      setError(typeof msg === 'string' ? msg : 'Failed to create contact. Please try again.');
+      setError(
+        typeof msg === 'string'
+          ? msg
+          : Array.isArray(msg)
+            ? (msg as string[]).join(', ')
+            : 'Failed to create contact. Please try again.',
+      );
     }
   };
 
@@ -80,9 +126,15 @@ export default function AddContactModal({ open, onClose }: AddContactModalProps)
             <Label htmlFor="ac-phone" className="text-xs font-medium text-[hsl(var(--muted-foreground))]">
               Phone number <span className="text-red-400">*</span>
             </Label>
-            <Input id="ac-phone" placeholder="919876543210" value={form.phoneNumber} onChange={set('phoneNumber')} />
+            <Input
+              id="ac-phone"
+              placeholder="919876543210 or +91 98765 43210"
+              value={form.phoneNumber}
+              onChange={set('phoneNumber')}
+            />
             <p className="text-[11px] text-[hsl(var(--muted-foreground))]">
-              Include country code, no + or spaces (e.g. 919876543210)
+              Indian (9876543210 or 919876543210) or international (+1 650 555 0123). Formatting is stripped
+              automatically.
             </p>
           </div>
 

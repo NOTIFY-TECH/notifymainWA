@@ -14,6 +14,13 @@ export class GatewayService {
     this.server.to(`tenant:${tenantId}`).emit('message:received', payload);
   }
 
+  emitMessageOutgoingSynced(tenantId: string, payload: any) {
+    if (!this.server) return;
+    this.server
+      .to(`tenant:${tenantId}`)
+      .emit('message:outgoing_synced', payload);
+  }
+
   emitSessionStatus(
     tenantId: string,
     payload: { sessionId: string; status: string },

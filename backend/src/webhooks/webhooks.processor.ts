@@ -341,11 +341,11 @@ export class WebhooksProcessor extends WorkerHost {
         },
       });
 
-      this.gatewayService.emitMessageReceived(session.tenantId, {
+      this.gatewayService.emitMessageOutgoingSynced(session.tenantId, {
         messageId: message.id,
         conversationId: conversation.id,
         sessionId: data.sessionId,
-        from: message.fromNumber,
+        to: message.toNumber,
         body: message.body,
         type: message.type,
         mediaUrl: message.mediaUrl,
