@@ -41,3 +41,4 @@ export * from './message';
 export * from './campaign';
 export * from './contact';
 export * from './analytics';
+export * from './team';

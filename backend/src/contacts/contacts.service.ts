@@ -2,6 +2,7 @@
   Injectable,
   ConflictException,
   NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ListContactsDto } from './dto/list-contacts.dto';
@@ -30,6 +31,27 @@ export class ContactsService {
       throw new NotFoundException(`Contact ${contactId} not found`);
     }
     return contact;
+  }
+
+  // ─── Shared: backfill conversations that predate a contact ──────────────────
+  //
+  // A Conversation only gets its contactId set at creation time (when an
+  // inbound message first arrives from an unknown number) or via
+  // createFromConversation. If a Contact is added/imported AFTER a
+  // Conversation with the same phoneNumber already exists, nothing ever
+  // re-links them — the inbox keeps showing the raw JID forever, even though
+  // a matching Contact now exists. This re-links any orphaned conversations
+  // (contactId null) that share the contact's phoneNumber, scoped to tenant.
+  // Called after both createContact and the import path's create branch.
+  private async backfillConversationLinks(
+    tenantId: string,
+    contactId: string,
+    phoneNumber: string,
+  ) {
+    await this.prisma.conversation.updateMany({
+      where: { tenantId, phoneNumber, contactId: null },
+      data: { contactId },
+    });
   }
 
   // ─── Feature 1 ──────────────────────────────────────────────────────────────
@@ -155,6 +177,14 @@ export class ContactsService {
       include: { tags: { select: { tag: true } } },
     });
 
+    // Re-link any conversation(s) that already existed with this phone
+    // number before the contact did — see backfillConversationLinks above.
+    await this.backfillConversationLinks(
+      tenantId,
+      contact.id,
+      contact.phoneNumber,
+    );
+
     return { ...contact, tags: contact.tags.map((t) => t.tag) };
   }
 
@@ -206,7 +236,38 @@ export class ContactsService {
     contactId: string,
     dto: UpdateContactDto,
   ) {
-    await this.findContactOrThrow(tenantId, contactId);
+    const current = await this.findContactOrThrow(tenantId, contactId);
+
+    // ── Phone number change: normalise, validate, check uniqueness ──────────
+    // Same normalisePhone() util used everywhere else (importContacts, the
+    // engine side, AddContactModal) — single source of truth per the
+    // permanent codebase rule. Editing the phone does NOT touch any existing
+    // Conversation.contactId links (those are FK-based, set once), but DOES
+    // run the same orphan-backfill as createContact in case some other
+    // conversation with the NEW number is waiting to be linked.
+    let normalisedPhone: string | undefined;
+    if (dto.phoneNumber !== undefined) {
+      const phoneResult = normalisePhone(dto.phoneNumber);
+      if (!phoneResult.valid) {
+        throw new BadRequestException(
+          `Invalid phoneNumber: ${phoneResult.reason}`,
+        );
+      }
+      normalisedPhone = phoneResult.normalised;
+
+      if (normalisedPhone !== current.phoneNumber) {
+        const collision = await this.prisma.contact.findUnique({
+          where: {
+            tenantId_phoneNumber: { tenantId, phoneNumber: normalisedPhone },
+          },
+        });
+        if (collision) {
+          throw new ConflictException(
+            `A contact with phone number ${normalisedPhone} already exists`,
+          );
+        }
+      }
+    }
 
     const contact = await this.prisma.contact.update({
       where: { id: contactId },
@@ -214,11 +275,23 @@ export class ContactsService {
         ...(dto.name !== undefined && { name: dto.name }),
         ...(dto.email !== undefined && { email: dto.email }),
         ...(dto.notes !== undefined && { notes: dto.notes }),
+        ...(normalisedPhone !== undefined && { phoneNumber: normalisedPhone }),
         ...(dto.isBlocked !== undefined && { isBlocked: dto.isBlocked }),
         ...(dto.isOptedOut !== undefined && { isOptedOut: dto.isOptedOut }),
       },
       include: { tags: { select: { tag: true } } },
     });
+
+    if (
+      normalisedPhone !== undefined &&
+      normalisedPhone !== current.phoneNumber
+    ) {
+      await this.backfillConversationLinks(
+        tenantId,
+        contact.id,
+        normalisedPhone,
+      );
+    }
 
     return { ...contact, tags: contact.tags.map((t) => t.tag) };
   }
@@ -243,6 +316,22 @@ export class ContactsService {
     });
 
     return this.getContact(tenantId, contactId);
+  }
+
+  // ─── Feature 5: Distinct tags for tenant ─────────────────────────────────────
+
+  async listDistinctTags(tenantId: string) {
+    const grouped = await this.prisma.contactTag.groupBy({
+      by: ['tag'],
+      where: { tenantId },
+      _count: { _all: true },
+      orderBy: { _count: { tag: 'desc' } },
+    });
+
+    return grouped.map((g) => ({
+      tag: g.tag,
+      count: g._count._all,
+    }));
   }
 
   async deleteContact(tenantId: string, contactId: string) {
@@ -376,7 +465,7 @@ export class ContactsService {
 
           result.updated++;
         } else {
-          await this.prisma.contact.create({
+          const created = await this.prisma.contact.create({
             data: {
               tenantId,
               phoneNumber,
@@ -387,6 +476,14 @@ export class ContactsService {
                 : undefined,
             },
           });
+
+          // Same backfill as createContact — an imported contact may match
+          // a conversation that already existed before the import ran.
+          await this.backfillConversationLinks(
+            tenantId,
+            created.id,
+            phoneNumber,
+          );
 
           result.created++;
         }

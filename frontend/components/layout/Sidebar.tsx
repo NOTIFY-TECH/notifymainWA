@@ -45,7 +45,7 @@ const NAV_SECTIONS = [
     label: 'Account',
     items: [
       { label: 'Analytics', href: '/dashboard/analytics', icon: BarChart2 },
-      { label: 'Team', href: '/dashboard/team', icon: UserCheck },
+      { label: 'Team', href: '/dashboard/settings/team', icon: UserCheck },
       { label: 'Billing', href: '/dashboard/billing', icon: CreditCard },
       { label: 'Settings', href: '/dashboard/settings', icon: Settings },
     ],
@@ -66,14 +66,10 @@ export default function Sidebar() {
   const { user } = useAuthStore();
   const sidebarRef = useRef<HTMLElement>(null);
 
-  // ── Close drawer on route change (mobile) ──
   useEffect(() => {
-    if (window.innerWidth < 768) {
-      setSidebarOpen(false);
-    }
+    if (window.innerWidth < 768) setSidebarOpen(false);
   }, [pathname, setSidebarOpen]);
 
-  // ── Close drawer on outside click (mobile) ──
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (
@@ -89,7 +85,6 @@ export default function Sidebar() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [sidebarOpen, setSidebarOpen]);
 
-  // ── Lock body scroll when mobile drawer is open ──
   useEffect(() => {
     if (window.innerWidth < 768) {
       document.body.style.overflow = sidebarOpen ? 'hidden' : '';
@@ -99,180 +94,213 @@ export default function Sidebar() {
     };
   }, [sidebarOpen]);
 
-  const isActive = (href: string) => {
-    if (href === '/dashboard') return pathname === '/dashboard';
-    return pathname.startsWith(href);
-  };
-
-  // ── On tablet, sidebar is always icon-only ──
-  // ── On desktop, sidebar respects sidebarOpen ──
-  // ── isExpanded drives label visibility ──
-  const isExpanded = sidebarOpen;
+  const isActive = (href: string) => (href === '/dashboard' ? pathname === '/dashboard' : pathname.startsWith(href));
 
   return (
     <>
-      {/* ── Mobile Overlay ── */}
+      {/* ── Mobile overlay ── */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm md:hidden"
+          className="fixed inset-0 z-30 bg-black/50 backdrop-blur-sm md:hidden"
           onClick={() => setSidebarOpen(false)}
           aria-hidden="true"
         />
       )}
 
-      {/* ── Sidebar Panel ── */}
+      {/* ── Sidebar panel ── */}
       <aside
         ref={sidebarRef}
         className={cn(
           'fixed left-0 top-0 z-40 flex h-screen flex-col',
-          'border-r border-[hsl(var(--sidebar-border))]',
-          'bg-[hsl(var(--sidebar))]',
+          'bg-[hsl(var(--sidebar))] border-r border-[hsl(var(--sidebar-border))]',
           'transition-all duration-300 ease-in-out',
-
-          // Mobile: full width drawer, hidden off-screen when closed
           'w-[240px]',
           !sidebarOpen && '-translate-x-full',
-
-          // Tablet: always visible, icon-only, no translate
           'md:translate-x-0 md:w-[64px]',
-
-          // Desktop: respects sidebarOpen for width
           'lg:w-[64px]',
           sidebarOpen && 'lg:w-[240px]',
         )}
       >
+        {/* ── Desktop toggle ── */}
+        <button
+          onClick={toggleSidebar}
+          className={cn(
+            'hidden lg:flex absolute -right-3 top-[26px] z-50',
+            'h-6 w-6 items-center justify-center rounded-full',
+            'border border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar))]',
+            'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]',
+            'shadow-sm transition-colors duration-150',
+          )}
+          aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+        >
+          {sidebarOpen ? <ChevronLeft size={13} /> : <ChevronRight size={13} />}
+        </button>
+
         {/* ── Logo ── */}
-        <div className="flex h-14 shrink-0 items-center border-b border-[hsl(var(--sidebar-border))] px-4 gap-3">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[hsl(var(--green))]">
-            <Zap size={16} className="text-[hsl(var(--primary-foreground))]" />
+        <div className="flex h-14 shrink-0 items-center gap-3 px-4 border-b border-[hsl(var(--sidebar-border))]">
+          <div
+            className={cn(
+              'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+              'bg-[hsl(var(--green))] text-[hsl(var(--primary-foreground))]',
+            )}
+          >
+            <Zap size={16} strokeWidth={2.5} />
           </div>
-          {/* Show label: always on mobile drawer, only when expanded on desktop */}
           <span
             className={cn(
-              'gradient-text font-semibold text-sm tracking-wide truncate',
+              'text-sm font-semibold tracking-tight text-[hsl(var(--foreground))] truncate',
               'md:hidden',
               sidebarOpen && 'lg:block',
             )}
           >
             NotifyTechAI
           </span>
-
-          {/* Mobile close button */}
           <button
             onClick={() => setSidebarOpen(false)}
-            className="ml-auto text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] md:hidden"
+            className="ml-auto text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] md:hidden transition-colors"
             aria-label="Close sidebar"
           >
-            <X size={18} />
+            <X size={17} />
           </button>
         </div>
 
         {/* ── Nav ── */}
-        <nav className="flex-1 overflow-y-auto overflow-x-hidden py-4 px-2 space-y-6">
-          {NAV_SECTIONS.map(section => (
-            <div key={section.label}>
-              {/* Section label */}
-              <p
-                className={cn(
-                  'mb-1 px-2 text-[10px] font-semibold uppercase tracking-widest text-[hsl(var(--muted-foreground))]',
-                  'md:hidden',
-                  sidebarOpen && 'lg:block',
-                )}
-              >
-                {section.label}
-              </p>
+        <nav className="flex-1 overflow-y-auto overflow-x-hidden py-5 px-2">
+          <div className="space-y-6">
+            {NAV_SECTIONS.map(section => (
+              <div key={section.label}>
+                {/* Section label */}
+                <p
+                  className={cn(
+                    'mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.1em]',
+                    'text-[hsl(var(--muted-foreground))]/50',
+                    'md:hidden',
+                    sidebarOpen && 'lg:block',
+                  )}
+                >
+                  {section.label}
+                </p>
 
-              <ul className="space-y-0.5">
-                {section.items.map(item => {
-                  const Icon = item.icon;
-                  const active = isActive(item.href);
+                <ul className="space-y-0.5">
+                  {section.items.map(item => {
+                    const Icon = item.icon;
+                    const active = isActive(item.href);
 
-                  const fullLink = (
-                    <Link href={item.href} className={cn('nav-link', active && 'active')}>
-                      <Icon size={18} className="shrink-0" />
-                      <span className="truncate">{item.label}</span>
-                    </Link>
-                  );
+                    // Full link (mobile drawer + desktop expanded)
+                    const fullLink = (
+                      <Link
+                        href={item.href}
+                        className={cn(
+                          'group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors duration-150',
+                          active
+                            ? 'text-[hsl(var(--green))] bg-[hsl(var(--green))]/8 font-medium'
+                            : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--sidebar-accent))]',
+                        )}
+                      >
+                        {/* Left accent bar for active */}
+                        {active && (
+                          <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-full bg-[hsl(var(--green))]" />
+                        )}
+                        <Icon
+                          size={17}
+                          className={cn(
+                            'shrink-0 transition-colors duration-150',
+                            active
+                              ? 'text-[hsl(var(--green))]'
+                              : 'text-[hsl(var(--muted-foreground))] group-hover:text-[hsl(var(--foreground))]',
+                          )}
+                        />
+                        <span className="truncate">{item.label}</span>
+                      </Link>
+                    );
 
-                  const iconLink = (
-                    <Link href={item.href} className={cn('nav-link justify-center px-0', active && 'active')}>
-                      <Icon size={18} className="shrink-0" />
-                    </Link>
-                  );
+                    // Icon-only link (tablet + desktop collapsed)
+                    const iconLink = (
+                      <Link
+                        href={item.href}
+                        className={cn(
+                          'relative flex h-10 w-10 mx-auto items-center justify-center rounded-lg transition-colors duration-150',
+                          active
+                            ? 'text-[hsl(var(--green))] bg-[hsl(var(--green))]/8'
+                            : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--sidebar-accent))]',
+                        )}
+                      >
+                        {/* Left accent bar for active — icon mode */}
+                        {active && (
+                          <span className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-0.5 rounded-full bg-[hsl(var(--green))]" />
+                        )}
+                        <Icon size={17} className="shrink-0" />
+                      </Link>
+                    );
 
-                  return (
-                    <li key={item.href}>
-                      {/* Mobile drawer: full link with label */}
-                      <span className="md:hidden">{fullLink}</span>
+                    return (
+                      <li key={item.href}>
+                        {/* Mobile */}
+                        <span className="md:hidden">{fullLink}</span>
 
-                      {/* Tablet: icon-only with tooltip */}
-                      <span className="hidden md:block lg:hidden">
-                        <Tooltip>
-                          <TooltipTrigger render={iconLink} />
-                          <TooltipContent side="right" sideOffset={8}>
-                            {item.label}
-                          </TooltipContent>
-                        </Tooltip>
-                      </span>
+                        {/* Tablet: icon + tooltip */}
+                        <span className="hidden md:block lg:hidden">
+                          <Tooltip>
+                            <TooltipTrigger render={iconLink} />
+                            <TooltipContent side="right" sideOffset={12} className="text-xs font-medium">
+                              {item.label}
+                            </TooltipContent>
+                          </Tooltip>
+                        </span>
 
-                      {/* Desktop expanded: full link with label */}
-                      <span className={cn('hidden', sidebarOpen && 'lg:block')}>{fullLink}</span>
+                        {/* Desktop expanded */}
+                        <span className={cn('hidden', sidebarOpen && 'lg:block')}>{fullLink}</span>
 
-                      {/* Desktop collapsed: icon-only with tooltip */}
-                      <span className={cn('hidden lg:block', sidebarOpen && 'lg:hidden')}>
-                        <Tooltip>
-                          <TooltipTrigger render={iconLink} />
-                          <TooltipContent side="right" sideOffset={8}>
-                            {item.label}
-                          </TooltipContent>
-                        </Tooltip>
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ))}
+                        {/* Desktop collapsed: icon + tooltip */}
+                        <span className={cn('hidden lg:block', sidebarOpen && 'lg:hidden')}>
+                          <Tooltip>
+                            <TooltipTrigger render={iconLink} />
+                            <TooltipContent side="right" sideOffset={12} className="text-xs font-medium">
+                              {item.label}
+                            </TooltipContent>
+                          </Tooltip>
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
+          </div>
         </nav>
 
-        {/* ── User Info ── */}
+        {/* ── User info ── */}
         {user && (
-          <div
-            className={cn(
-              'border-t border-[hsl(var(--sidebar-border))] p-3',
-              'flex items-center gap-3',
-              'md:justify-center',
-              sidebarOpen && 'lg:justify-start',
-            )}
-          >
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[hsl(var(--muted))] text-xs font-semibold uppercase">
-              {user.firstName?.charAt(0) ?? 'U'}
-            </div>
-            <div className={cn('flex-1 min-w-0', 'md:hidden', sidebarOpen && 'lg:block')}>
-              <p className="truncate text-sm font-medium text-[hsl(var(--foreground))]">
-                {user.firstName} {user.lastName}
-              </p>
-              <span className={cn('mt-0.5 inline-block', ROLE_COLORS[user.role] ?? 'badge-green')}>
-                {user.role.replace('_', ' ')}
-              </span>
+          <div className="shrink-0 border-t border-[hsl(var(--sidebar-border))] p-3">
+            <div
+              className={cn(
+                'flex items-center gap-3 rounded-lg p-2',
+                'hover:bg-[hsl(var(--sidebar-accent))] transition-colors duration-150 cursor-default',
+                !sidebarOpen && 'md:justify-center',
+              )}
+            >
+              {/* Avatar */}
+              <div
+                className={cn(
+                  'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                  'bg-[hsl(var(--green))]/12 text-[hsl(var(--green))] text-xs font-bold uppercase',
+                )}
+              >
+                {user.firstName?.charAt(0) ?? 'U'}
+              </div>
+
+              {/* Name + role */}
+              <div className={cn('flex-1 min-w-0 md:hidden', sidebarOpen && 'lg:block')}>
+                <p className="truncate text-xs font-semibold text-[hsl(var(--foreground))] leading-tight">
+                  {user.firstName} {user.lastName}
+                </p>
+                <span className={cn('mt-1 inline-block', ROLE_COLORS[user.role] ?? 'badge-green')}>
+                  {user.role.replace(/_/g, ' ')}
+                </span>
+              </div>
             </div>
           </div>
         )}
-
-        {/* ── Collapse Toggle (desktop only) ── */}
-        <button
-          onClick={toggleSidebar}
-          aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
-          className={cn(
-            'hidden lg:flex h-10 w-full items-center',
-            'border-t border-[hsl(var(--sidebar-border))]',
-            'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]',
-            'hover:bg-[hsl(var(--sidebar-accent))] transition-colors duration-150',
-            sidebarOpen ? 'justify-end px-4' : 'justify-center',
-          )}
-        >
-          {sidebarOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
-        </button>
       </aside>
     </>
   );

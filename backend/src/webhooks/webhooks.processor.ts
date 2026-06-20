@@ -9,6 +9,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { ConfigService } from '@nestjs/config';
 import { ALLOWED_MIME_TYPES } from '../media/media.module';
 import { CampaignContactStatus } from '@prisma/client';
+import { computeCampaignProgress } from '../campaigns/utils/campaign-progress.util';
+import { normalisePhone } from '../common/utils/phone.util';
 
 @Processor('webhook-events')
 export class WebhooksProcessor extends WorkerHost {
@@ -105,6 +107,30 @@ export class WebhooksProcessor extends WorkerHost {
     this.logger.log(`Session disconnected: ${data.sessionId}`);
   }
 
+  // ── Resolve a real, normalised phone number to match against Contact ─────
+  //
+  // `fromNumber`/`toNumber` are full addressable JIDs and may be a @lid
+  // (WhatsApp privacy ID) that bears NO relation to a phone number — Baileys
+  // explicitly cannot decode a LID back to one. Comparing that directly
+  // against Contact.phoneNumber (always a real, normalised number) silently
+  // never matches for @lid chats, which is why contacts with a real saved
+  // number never linked to their inbox conversation.
+  //
+  // The engine (SessionManager._handleIncomingMessage) already resolves and
+  // attaches the real number as payload.pn whenever WhatsApp reveals it
+  // (msg.key.senderPn / participantPn) — prefer that. Falls back to the JID
+  // itself only for older/non-LID chats where it's already a real-number JID
+  // (e.g. ...@s.whatsapp.net with digits WhatsApp app numbers).
+  private resolveContactMatchPhone(payload: any, jid: string): string | null {
+    const candidate: string | undefined = payload.pn ?? undefined;
+    const raw = candidate ?? (jid.endsWith('@lid') ? null : jid);
+    if (!raw) return null;
+
+    const digitsOnly = raw.split('@')[0];
+    const result = normalisePhone(digitsOnly);
+    return result.valid ? result.normalised : null;
+  }
+
   private async handleMessageReceived(data: any): Promise<void> {
     try {
       const session = await this.prisma.session.findFirst({
@@ -156,15 +182,20 @@ export class WebhooksProcessor extends WorkerHost {
 
       const now = new Date(data.timestamp ?? Date.now());
 
-      const contact = await this.prisma.contact.findUnique({
-        where: {
-          tenantId_phoneNumber: {
-            tenantId: session.tenantId,
-            phoneNumber: fromNumber,
-          },
-        },
-        select: { id: true },
-      });
+      // ── Contact matching: PN, not JID — see resolveContactMatchPhone above ──
+      const matchPhone = this.resolveContactMatchPhone(payload, fromNumber);
+
+      const contact = matchPhone
+        ? await this.prisma.contact.findUnique({
+            where: {
+              tenantId_phoneNumber: {
+                tenantId: session.tenantId,
+                phoneNumber: matchPhone,
+              },
+            },
+            select: { id: true },
+          })
+        : null;
 
       const conversation = await this.prisma.conversation.upsert({
         where: {
@@ -288,15 +319,21 @@ export class WebhooksProcessor extends WorkerHost {
 
       const now = new Date(data.timestamp ?? Date.now());
 
-      const contact = await this.prisma.contact.findUnique({
-        where: {
-          tenantId_phoneNumber: {
-            tenantId: session.tenantId,
-            phoneNumber: toNumber,
-          },
-        },
-        select: { id: true },
-      });
+      // Same PN-vs-JID matching as handleMessageReceived — see
+      // resolveContactMatchPhone for the full explanation.
+      const matchPhone = this.resolveContactMatchPhone(payload, toNumber);
+
+      const contact = matchPhone
+        ? await this.prisma.contact.findUnique({
+            where: {
+              tenantId_phoneNumber: {
+                tenantId: session.tenantId,
+                phoneNumber: matchPhone,
+              },
+            },
+            select: { id: true },
+          })
+        : null;
 
       const conversation = await this.prisma.conversation.upsert({
         where: {
@@ -437,13 +474,39 @@ export class WebhooksProcessor extends WorkerHost {
     const ack = ackMap.get(data.payload?.ack);
     if (!ack || !data.payload?.externalId) return;
 
-    await this.prisma.message.updateMany({
+    // ── Race condition guard ──────────────────────────────────────────────
+    // Baileys can emit the ack event before MessagesService.sendMessage()
+    // has finished writing externalId onto the Message row (that write only
+    // happens after the engine's HTTP response returns). If this job runs
+    // first, updateMany matches 0 rows and the ack is silently lost forever.
+    // Retry briefly with backoff before giving up.
+    const RETRY_DELAYS_MS = [150, 300, 600, 1000];
+    let updateResult = await this.prisma.message.updateMany({
       where: { externalId: data.payload.externalId },
       data: {
         status: ack.status as any,
         [ack.field]: new Date(data.timestamp),
       },
     });
+
+    for (const delay of RETRY_DELAYS_MS) {
+      if (updateResult.count > 0) break;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      updateResult = await this.prisma.message.updateMany({
+        where: { externalId: data.payload.externalId },
+        data: {
+          status: ack.status as any,
+          [ack.field]: new Date(data.timestamp),
+        },
+      });
+    }
+
+    if (updateResult.count === 0) {
+      this.logger.warn(
+        `message.ack — no Message row found for externalId ${data.payload.externalId} after retries, dropping ack (status would have been ${ack.status})`,
+      );
+      return;
+    }
 
     // ── Emit WebSocket event so frontend updates tick in real time ──
     const message = await this.prisma.message.findFirst({
@@ -468,38 +531,33 @@ export class WebhooksProcessor extends WorkerHost {
         },
       });
 
-      const counterFieldMap: Record<string, string> = {
-        SENT: 'sentCount',
-        DELIVERED: 'deliveredCount',
-        READ: 'readCount',
-        FAILED: 'failedCount',
-      };
-      const counterField = counterFieldMap[ack.status];
-
-      const campaign = await this.prisma.campaign.update({
+      // Counts are derived fresh from CampaignContact.status here, not from
+      // an incremented Campaign counter column. The old version incremented
+      // a counter on every ack (e.g. sentCount++ on ack=1), but the campaign
+      // processor was ALSO incrementing sentCount synchronously right after
+      // the send HTTP call returned — so every successful send counted
+      // twice, guaranteed, not just on retried/duplicate webhooks.
+      const campaign = await this.prisma.campaign.findUnique({
         where: { id: message.campaignId },
-        data: { [counterField]: { increment: 1 } },
-        select: {
-          id: true,
-          tenantId: true,
-          sentCount: true,
-          deliveredCount: true,
-          readCount: true,
-          failedCount: true,
-          totalContacts: true,
-          status: true,
-        },
+        select: { id: true, tenantId: true, totalContacts: true, status: true },
       });
 
-      this.gatewayService.emitCampaignProgress(campaign.tenantId, {
-        campaignId: campaign.id,
-        sentCount: campaign.sentCount,
-        deliveredCount: campaign.deliveredCount,
-        readCount: campaign.readCount,
-        failedCount: campaign.failedCount,
-        totalContacts: campaign.totalContacts,
-        status: campaign.status,
-      });
+      if (campaign) {
+        const progress = await computeCampaignProgress(
+          this.prisma,
+          campaign.id,
+        );
+
+        this.gatewayService.emitCampaignProgress(campaign.tenantId, {
+          campaignId: campaign.id,
+          sentCount: progress.sentCount,
+          deliveredCount: progress.deliveredCount,
+          readCount: progress.readCount,
+          failedCount: progress.failedCount,
+          totalContacts: campaign.totalContacts,
+          status: campaign.status,
+        });
+      }
     }
 
     this.logger.log(`Message ack: ${data.payload.externalId} → ${ack.status}`);

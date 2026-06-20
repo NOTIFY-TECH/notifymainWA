@@ -7,17 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { GatewayService } from '../gateway/gateway.service';
 import { EngineRegistryService } from '../engine-registry/engine-registry.service';
 import { EngineClientService } from '../engine-registry/engine-client.service';
-
-const PROGRESS_SELECT = {
-  id: true,
-  tenantId: true,
-  sentCount: true,
-  deliveredCount: true,
-  readCount: true,
-  failedCount: true,
-  totalContacts: true,
-  status: true,
-} as const;
+import { computeCampaignProgress } from './utils/campaign-progress.util';
 
 @Processor('campaign-queue')
 export class CampaignProcessor extends WorkerHost {
@@ -78,7 +68,10 @@ export class CampaignProcessor extends WorkerHost {
 
     const apiKey = this.config.get<string>('OPENWA_API_KEY');
     const delayMs = Math.floor(60000 / (campaign.rateLimitPerMin || 30));
-    const messageType = campaign.mediaUrl ? 'IMAGE' : 'TEXT';
+    const messageType = resolveMessageType(
+      campaign.mediaUrl,
+      campaign.mediaType,
+    );
     const engineMediaUrl = this.engineClient.toEngineAccessibleUrl(
       campaign.mediaUrl,
     );
@@ -132,6 +125,7 @@ export class CampaignProcessor extends WorkerHost {
             to: contact.phoneNumber,
             type: messageType.toLowerCase(),
             text: campaign.messageTemplate,
+            caption: campaign.messageTemplate,
             mediaUrl: engineMediaUrl,
             messageId: message.id,
           },
@@ -153,7 +147,7 @@ export class CampaignProcessor extends WorkerHost {
           data: { status: 'SENT', sentAt: new Date(), messageId: message.id },
         });
 
-        await this.bumpAndEmit(campaignId, tenantId, 'sentCount');
+        await this.emitProgress(campaignId, tenantId);
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
 
@@ -176,7 +170,7 @@ export class CampaignProcessor extends WorkerHost {
           },
         });
 
-        await this.bumpAndEmit(campaignId, tenantId, 'failedCount');
+        await this.emitProgress(campaignId, tenantId);
 
         this.logger.error(
           `Campaign ${campaignId}: failed to send to ${contact.phoneNumber}: ${errMsg}`,
@@ -188,58 +182,57 @@ export class CampaignProcessor extends WorkerHost {
 
     const finalCampaign = await this.prisma.campaign.findUnique({
       where: { id: campaignId },
-      select: PROGRESS_SELECT,
+      select: { id: true, status: true },
     });
 
-    if (finalCampaign?.status !== 'CANCELLED') {
-      const completed = await this.prisma.campaign.update({
+    if (finalCampaign && finalCampaign.status !== 'CANCELLED') {
+      await this.prisma.campaign.update({
         where: { id: campaignId },
         data: { status: 'COMPLETED', completedAt: new Date() },
-        select: PROGRESS_SELECT,
       });
 
-      this.gatewayService.emitCampaignProgress(
-        tenantId,
-        this.toProgressPayload(completed),
-      );
+      await this.emitProgress(campaignId, tenantId);
     }
   }
 
-  /** Increment a Campaign counter and emit campaign:progress with the fresh totals. */
-  private async bumpAndEmit(
+  private async emitProgress(
     campaignId: string,
     tenantId: string,
-    counterField: 'sentCount' | 'failedCount',
-  ) {
-    const campaign = await this.prisma.campaign.update({
+  ): Promise<void> {
+    const campaign = await this.prisma.campaign.findUnique({
       where: { id: campaignId },
-      data: { [counterField]: { increment: 1 } },
-      select: PROGRESS_SELECT,
+      select: { id: true, totalContacts: true, status: true },
     });
+    if (!campaign) return;
 
-    this.gatewayService.emitCampaignProgress(
-      tenantId,
-      this.toProgressPayload(campaign),
-    );
-  }
+    const progress = await computeCampaignProgress(this.prisma, campaignId);
 
-  private toProgressPayload(campaign: {
-    id: string;
-    sentCount: number;
-    deliveredCount: number;
-    readCount: number;
-    failedCount: number;
-    totalContacts: number;
-    status: string;
-  }) {
-    return {
+    this.gatewayService.emitCampaignProgress(tenantId, {
       campaignId: campaign.id,
-      sentCount: campaign.sentCount,
-      deliveredCount: campaign.deliveredCount,
-      readCount: campaign.readCount,
-      failedCount: campaign.failedCount,
+      sentCount: progress.sentCount,
+      deliveredCount: progress.deliveredCount,
+      readCount: progress.readCount,
+      failedCount: progress.failedCount,
       totalContacts: campaign.totalContacts,
       status: campaign.status,
-    };
+    });
   }
+}
+
+/**
+ * Derives the engine message type from the campaign's stored MIME type.
+ * Falls back gracefully: if mediaUrl exists but mediaType is missing,
+ * defaults to IMAGE (legacy behaviour). No mediaUrl → TEXT.
+ */
+function resolveMessageType(
+  mediaUrl: string | null,
+  mediaType: string | null,
+): string {
+  if (!mediaUrl) return 'TEXT';
+  if (!mediaType) return 'IMAGE'; // legacy fallback
+  if (mediaType.startsWith('image/')) return 'IMAGE';
+  if (mediaType.startsWith('video/')) return 'VIDEO';
+  if (mediaType.startsWith('audio/')) return 'AUDIO';
+  if (mediaType === 'application/pdf') return 'DOCUMENT';
+  return 'IMAGE'; // unknown media — best guess
 }

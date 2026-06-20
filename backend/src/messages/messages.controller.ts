@@ -15,17 +15,21 @@ import { SendMessageDto } from './dto/send-message.dto';
 import { ListMessagesDto } from './dto/list-messages.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { TenantGuard } from '../common/guards/tenant.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { UserRole } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @ApiTags('Messages')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, TenantGuard)
+@UseGuards(JwtAuthGuard, TenantGuard, RolesGuard)
 @Controller('tenants/:tenantId/messages')
 export class MessagesController {
   constructor(private readonly messagesService: MessagesService) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   async sendMessage(
     @Param('tenantId') tenantId: string,
     @Body() dto: SendMessageDto,
@@ -35,6 +39,12 @@ export class MessagesController {
   }
 
   @Get()
+  @Roles(
+    UserRole.TENANT_OWNER,
+    UserRole.TENANT_ADMIN,
+    UserRole.AGENT,
+    UserRole.VIEWER,
+  )
   async listMessages(
     @Param('tenantId') tenantId: string,
     @Query() query: ListMessagesDto,

@@ -10,6 +10,7 @@ export interface Campaign {
   status: CampaignStatus;
   messageTemplate: string;
   mediaUrl: string | null;
+  mediaType: string | null;
   scheduledAt: string | null;
   startedAt: string | null;
   completedAt: string | null;
@@ -49,8 +50,24 @@ export interface CreateCampaignRequest {
   sessionId: string;
   messageTemplate: string;
   mediaUrl?: string;
+  mediaType?: string;
   contactIds?: string[];
+  tags?: string[];
   scheduledAt?: string;
+  rateLimitPerMin?: number;
+}
+
+// ─── Update (edit) campaign ────────────────────────────────────────────────────
+
+// All fields optional — PATCH semantics. scheduledAt: undefined = don't touch,
+// null = clear the schedule, string = set a new one.
+export interface UpdateCampaignRequest {
+  name?: string;
+  sessionId?: string;
+  messageTemplate?: string;
+  mediaUrl?: string;
+  mediaType?: string;
+  scheduledAt?: string | null;
   rateLimitPerMin?: number;
 }
 
@@ -60,6 +77,8 @@ export interface ListCampaignsParams {
   status?: CampaignStatus;
   sessionId?: string;
   search?: string;
+  dateFrom?: string;
+  dateTo?: string;
 }
 
 // Payload shape for the 'campaign:progress' WebSocket event
@@ -86,4 +105,34 @@ export interface ImportRecipientsResult {
   created: number;
   skipped: number;
   errors: RecipientImportError[];
+}
+
+// ─── Retry failed recipients ──────────────────────────────────────────────────
+
+// Return shape from POST .../retry-failed — service spreads computeCampaignProgress
+// onto { campaignId, retriedCount }, so this mirrors the progress fields on
+// Campaign rather than re-typing them separately.
+export interface RetryFailedResult {
+  campaignId: string;
+  retriedCount: number;
+  sentCount: number;
+  deliveredCount: number;
+  readCount: number;
+  failedCount: number;
+  totalContacts: number;
+  status: CampaignStatus;
+}
+
+// ─── Add contacts to campaign ─────────────────────────────────────────────────
+
+// Return shape from POST .../contacts — service spreads computeCampaignProgress
+// plus addedCount/skippedCount.
+export interface AddContactsResult {
+  addedCount: number;
+  skippedCount: number;
+  sentCount: number;
+  deliveredCount: number;
+  readCount: number;
+  failedCount: number;
+  totalContacts: number;
 }

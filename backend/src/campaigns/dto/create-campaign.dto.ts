@@ -29,13 +29,29 @@ export class CreateCampaignDto {
   @IsString()
   mediaUrl?: string;
 
+  @ApiPropertyOptional({
+    description:
+      'MIME type of the media file, e.g. image/jpeg, video/mp4, application/pdf',
+  })
+  @IsOptional()
+  @IsString()
+  mediaType?: string;
+
   @ApiPropertyOptional({ type: [String] })
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
   contactIds?: string[];
 
-  // ISO datetime. Omit or null = send immediately.
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'Send to all contacts having any of these tags',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  tags?: string[];
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsDateString()

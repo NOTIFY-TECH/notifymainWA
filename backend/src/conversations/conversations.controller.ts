@@ -13,16 +13,25 @@ import { ConversationsService } from './conversations.service';
 import { ListConversationsDto } from './dto/list-conversations.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { TenantGuard } from '../common/guards/tenant.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { UserRole } from '@prisma/client';
 
 @ApiTags('Conversations')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, TenantGuard)
+@UseGuards(JwtAuthGuard, TenantGuard, RolesGuard)
 @Controller('tenants/:tenantId/conversations')
 export class ConversationsController {
   constructor(private readonly conversationsService: ConversationsService) {}
 
   // GET /tenants/:tenantId/conversations
   @Get()
+  @Roles(
+    UserRole.TENANT_OWNER,
+    UserRole.TENANT_ADMIN,
+    UserRole.AGENT,
+    UserRole.VIEWER,
+  )
   async listConversations(
     @Param('tenantId') tenantId: string,
     @Query() query: ListConversationsDto,
@@ -32,6 +41,12 @@ export class ConversationsController {
 
   // GET /tenants/:tenantId/conversations/:conversationId
   @Get(':conversationId')
+  @Roles(
+    UserRole.TENANT_OWNER,
+    UserRole.TENANT_ADMIN,
+    UserRole.AGENT,
+    UserRole.VIEWER,
+  )
   async getConversation(
     @Param('tenantId') tenantId: string,
     @Param('conversationId') conversationId: string,
@@ -43,6 +58,12 @@ export class ConversationsController {
   @Get(':conversationId/messages')
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'before', required: false, type: String })
+  @Roles(
+    UserRole.TENANT_OWNER,
+    UserRole.TENANT_ADMIN,
+    UserRole.AGENT,
+    UserRole.VIEWER,
+  )
   async getMessages(
     @Param('tenantId') tenantId: string,
     @Param('conversationId') conversationId: string,
@@ -60,6 +81,7 @@ export class ConversationsController {
   // POST /tenants/:tenantId/conversations/:conversationId/read
   @Post(':conversationId/read')
   @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   async markAsRead(
     @Param('tenantId') tenantId: string,
     @Param('conversationId') conversationId: string,

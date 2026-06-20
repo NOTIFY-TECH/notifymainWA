@@ -20,6 +20,8 @@ import { join } from 'path';
 import { MediaModule } from './media/media.module';
 import { ContactsModule } from './contacts/contacts.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
+import { AnalyticsModule } from './analytics/analytics.module';
+import { TeamModule } from './team/team.module';
 
 @Module({
   imports: [
@@ -54,9 +56,10 @@ import { CampaignsModule } from './campaigns/campaigns.module';
     ConversationsModule,
     ContactsModule,
     CampaignsModule,
+    TeamModule,
+    AnalyticsModule,
     GatewayModule,
     HealthModule,
-    // Add after HealthModule in the imports array
     MediaModule,
     ServeStaticModule.forRoot({
       rootPath: join(process.cwd(), 'uploads'),

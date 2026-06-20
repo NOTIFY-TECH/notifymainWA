@@ -50,8 +50,6 @@ export default function SessionsPage() {
     onError: () => error('Failed to delete session'),
   });
 
-  // Reconnect — tries to restore existing WhatsApp auth without new QR
-  // Opens QR modal anyway so user sees status; QrModal handles connected state
   const reconnectMutation = useMutation({
     mutationFn: (id: string) => sessionsApi.reconnect(id),
     onSuccess: (_, id) => {
@@ -63,7 +61,6 @@ export default function SessionsPage() {
     onError: () => error('Failed to reconnect session'),
   });
 
-  // Unlink — clears auth, then opens QR modal for scanning a new number
   const unlinkMutation = useMutation({
     mutationFn: (id: string) => sessionsApi.unlink(id),
     onSuccess: (_, id) => {
@@ -122,37 +119,44 @@ export default function SessionsPage() {
         />
       )}
 
-      <div className="max-w-7xl mx-auto space-y-6 animate-fade-in">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
+      <div className="space-y-8">
+        {/* ── Header ── */}
+        <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-xl font-semibold text-[hsl(var(--foreground))]">Sessions</h1>
-            <p className="text-sm text-[hsl(var(--muted-foreground))] mt-0.5">
+            <p className="text-xs font-medium uppercase tracking-widest text-[hsl(var(--muted-foreground))] mb-1">
+              WhatsApp
+            </p>
+            <h1 className="text-2xl font-bold tracking-tight text-[hsl(var(--foreground))]">Sessions</h1>
+            <p className="text-sm text-[hsl(var(--muted-foreground))] mt-1">
               {isLoading
                 ? 'Loading…'
                 : totalCount === 0
-                  ? 'No sessions connected'
+                  ? 'No sessions yet'
                   : `${connectedCount} of ${totalCount} connected`}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 pt-1">
             <button
               onClick={() => queryClient.invalidateQueries({ queryKey: ['sessions'] })}
-              className="flex h-8 w-8 items-center justify-center rounded-[var(--radius)] border border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))] transition-colors"
+              className="flex h-9 w-9 items-center justify-center rounded-[var(--radius)] border border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))] transition-colors"
+              aria-label="Refresh"
             >
-              <RefreshCw className="w-4 h-4" />
+              <RefreshCw size={14} />
             </button>
             <button
               onClick={() => setShowCreate(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-[var(--radius)] bg-[#22C55E]/20 border border-[#22C55E]/30 text-sm text-[hsl(var(--green))] hover:bg-[#22C55E]/30 transition-colors font-medium"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-[var(--radius)] bg-[hsl(var(--green-dim))] border border-[hsl(var(--green)/0.25)] text-sm text-[hsl(var(--green))] hover:bg-[hsl(var(--green)/0.2)] transition-colors font-medium"
             >
-              <Plus className="w-4 h-4" />
+              <Plus size={15} />
               New session
             </button>
           </div>
         </div>
 
+        {/* ── Summary strip ── */}
         {!isLoading && totalCount > 0 && <SessionsSummaryStrip sessions={sessions!} />}
 
+        {/* ── Cards grid ── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {isLoading ? (
             Array.from({ length: 6 }).map((_, i) => <SessionCardSkeleton key={i} />)

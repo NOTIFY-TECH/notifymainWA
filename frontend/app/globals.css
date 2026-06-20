@@ -1,12 +1,12 @@
-﻿@import "tailwindcss";
+﻿@import 'tailwindcss';
 
 @layer base {
   :root {
     --background: 215 28% 7%;
     --foreground: 213 31% 91%;
-    --card: 215 28% 9%;
+    --card: 215 28% 11%;
     --card-foreground: 213 31% 91%;
-    --popover: 215 28% 9%;
+    --popover: 215 28% 11%;
     --popover-foreground: 213 31% 91%;
     --primary: 134 61% 41%;
     --primary-foreground: 134 100% 5%;
@@ -81,15 +81,27 @@
   body {
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
-    font-feature-settings: "rlig" 1, "calt" 1;
+    font-feature-settings:
+      'rlig' 1,
+      'calt' 1;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
 
-  ::-webkit-scrollbar { width: 5px; height: 5px; }
-  ::-webkit-scrollbar-track { background: hsl(var(--muted)); }
-  ::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 999px; }
-  ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground)); }
+  ::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--muted));
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground));
+  }
 
   :focus-visible {
     outline: 2px solid hsl(var(--ring));
@@ -98,8 +110,12 @@
 }
 
 @layer utilities {
-  .glow-green { box-shadow: 0 0 18px hsl(var(--green-glow)); }
-  .glow-purple { box-shadow: 0 0 18px hsl(var(--purple-glow)); }
+  .glow-green {
+    box-shadow: 0 0 18px hsl(var(--green-glow));
+  }
+  .glow-purple {
+    box-shadow: 0 0 18px hsl(var(--purple-glow));
+  }
 
   .glass {
     background: hsl(var(--card) / 0.8);
@@ -129,7 +145,10 @@
     font-size: 0.875rem;
     color: hsl(var(--muted-foreground));
     border-left: 2px solid transparent;
-    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    transition:
+      background 0.15s ease,
+      color 0.15s ease,
+      border-color 0.15s ease;
     text-decoration: none;
   }
 
@@ -157,7 +176,11 @@
     color: hsl(var(--green));
     border: 1.5px solid hsl(var(--green));
     border-radius: var(--radius);
-    transition: background 0.18s ease, color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+    transition:
+      background 0.18s ease,
+      color 0.18s ease,
+      transform 0.18s ease,
+      box-shadow 0.18s ease;
   }
   .btn-outline-green:hover {
     background: hsl(var(--green));
@@ -171,7 +194,11 @@
     color: hsl(var(--purple));
     border: 1.5px solid hsl(var(--purple));
     border-radius: var(--radius);
-    transition: background 0.18s ease, color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+    transition:
+      background 0.18s ease,
+      color 0.18s ease,
+      transform 0.18s ease,
+      box-shadow 0.18s ease;
   }
   .btn-outline-purple:hover {
     background: hsl(var(--purple));
@@ -181,7 +208,10 @@
   }
 
   .card-hover {
-    transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+    transition:
+      border-color 0.18s ease,
+      transform 0.18s ease,
+      box-shadow 0.18s ease;
   }
   .card-hover:hover {
     border-color: hsl(var(--green));

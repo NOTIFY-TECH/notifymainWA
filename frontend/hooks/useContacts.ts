@@ -5,6 +5,7 @@ import {
   CreateContactRequest,
   UpdateContactRequest,
   ListContactsParams,
+  DistinctTag,
 } from '@/services/contacts-api';
 import { useAuthStore } from '@/store/authStore';
 import { PaginatedResponse } from '@/types/index';
@@ -17,6 +18,7 @@ export const contactKeys = {
   all: (tenantId: string) => ['contacts', tenantId] as const,
   list: (tenantId: string, filters?: object) => ['contacts', tenantId, 'list', filters] as const,
   detail: (tenantId: string, id: string) => ['contacts', tenantId, 'detail', id] as const,
+  tags: (tenantId: string) => ['contacts', tenantId, 'tags'] as const,
 };
 
 // ─── useContacts ──────────────────────────────────────────────────────────────
@@ -102,6 +104,37 @@ export function useContactTags(contactId: string) {
   });
 
   return { add, remove };
+}
+
+// ─── useDistinctTags ────────────────────────────────────────────────────────
+
+export function useDistinctTags() {
+  const tenantId = useAuthStore.getState().tenant?.id ?? '';
+
+  return useQuery({
+    queryKey: contactKeys.tags(tenantId),
+    queryFn: () => contactsApi.listTags(tenantId),
+    enabled: !!tenantId,
+  });
+}
+
+// ─── useEstimatedTagCount ───────────────────────────────────────────────────
+//
+// Reuses the existing contacts list endpoint with limit: 1 purely to read
+// meta.total. Avoids a dedicated count endpoint for what's just a live
+// estimate shown while picking tags in ContactSelector. Shares cache with
+// useContacts since the query key is identical for identical params.
+
+export function useEstimatedTagCount(tags: string[]) {
+  const tenantId = useAuthStore.getState().tenant?.id ?? '';
+  const params: ListContactsParams = { tags, limit: 1 };
+
+  return useQuery({
+    queryKey: contactKeys.list(tenantId, params),
+    queryFn: () => contactsApi.list(tenantId, params),
+    enabled: !!tenantId && tags.length > 0,
+    select: data => data.meta.total,
+  });
 }
 
 // ─── useDeleteContact ─────────────────────────────────────────────────────────

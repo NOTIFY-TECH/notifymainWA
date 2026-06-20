@@ -148,6 +148,7 @@ model Tenant {
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
   deletedAt          DateTime?
+  invitations       Invitation[]
 
   users         User[]
   sessions      Session[]
@@ -193,6 +194,7 @@ model User {
   auditLogs             AuditLog[]
   createdSessions       Session[]      @relation("SessionCreator")
   createdCampaigns      Campaign[]     @relation("CampaignCreator") 
+  sentInvitations Invitation[] @relation("InvitationSender")
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -391,6 +393,7 @@ model Campaign {
   status          CampaignStatus @default(DRAFT)
   messageTemplate String         @db.Text
   mediaUrl        String?        @db.VarChar(1000)
+   mediaType       String?        @db.VarChar(50)
   scheduledAt     DateTime?
   startedAt       DateTime?
   completedAt     DateTime?
@@ -603,7 +606,6 @@ model Invoice {
   @@map("invoices")
 }
 
-
 // ─────────────────────────────────────────
 //  WebhookLog
 // ─────────────────────────────────────────
@@ -620,4 +622,28 @@ model WebhookLog {
   @@index([sessionId])
   @@index([eventType])
   @@index([createdAt])
+}
+
+// ─────────────────────────────────────────
+//  Invitations
+// ─────────────────────────────────────────
+
+model Invitation {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String    @db.Uuid
+  invitedById String    @db.Uuid
+  email       String    @db.VarChar(255)
+  role        UserRole
+  token       String    @unique @db.VarChar(255)
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invitedBy User   @relation("InvitationSender", fields: [invitedById], references: [id])
+
+  @@unique([tenantId, email])
+  @@index([token])
+  @@index([tenantId])
+  @@map("invitations")
 }

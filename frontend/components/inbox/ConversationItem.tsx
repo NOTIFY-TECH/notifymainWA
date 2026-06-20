@@ -22,25 +22,28 @@ export default function ConversationItem({ conversation, isActive, onClick }: Co
     if (lastMessage?.type === 'DOCUMENT') return '📄 Document';
     return lastMessage?.body ?? conversation.lastMessageText ?? 'No messages yet';
   })();
+
   const lastTime = conversation.lastMessageAt ?? conversation.updatedAt;
   const unread = conversation.unreadCount ?? 0;
 
   return (
     <button
+      type="button"
       onClick={onClick}
       className={cn(
         'w-full text-left px-4 py-3 flex items-start gap-3',
         'border-b border-[hsl(var(--border))]',
         'transition-colors duration-100',
-        'hover:bg-[hsl(var(--muted))]',
-        isActive && 'bg-[hsl(var(--muted))] border-l-2 border-l-[hsl(var(--green))]',
+        isActive ? 'bg-[hsl(var(--green))]/8 border-l-2 border-l-[hsl(var(--green))]' : 'hover:bg-[hsl(var(--muted))]',
       )}
     >
       {/* Avatar */}
       <div
         className={cn(
-          'flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold uppercase',
-          isActive ? 'bg-[hsl(var(--green))] text-white' : 'bg-[hsl(var(--muted))] text-[hsl(var(--foreground))]',
+          'flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold uppercase',
+          isActive
+            ? 'bg-[hsl(var(--green))]/20 text-[hsl(var(--green))]'
+            : 'bg-[hsl(var(--muted))] text-[hsl(var(--foreground))]',
         )}
       >
         {displayName?.charAt(0) ?? <MessageSquare size={16} />}

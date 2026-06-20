@@ -23,9 +23,9 @@ export default function ContactDetailPage({ params }: Props) {
 
   if (isLoading) {
     return (
-      <div className="max-w-2xl mx-auto flex flex-col gap-4 pt-2">
-        <Skeleton className="h-8 w-32" />
-        <div className="rounded-xl border border-[hsl(var(--border))] overflow-hidden">
+      <div className="max-w-2xl mx-auto space-y-6">
+        <Skeleton className="h-5 w-28" />
+        <div className="rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden">
           <div className="p-6 flex items-start gap-4">
             <Skeleton className="h-14 w-14 rounded-full shrink-0" />
             <div className="flex-1 space-y-2">
@@ -48,7 +48,7 @@ export default function ContactDetailPage({ params }: Props) {
 
   if (isError || !contact) {
     return (
-      <div className="max-w-2xl mx-auto pt-12 text-center">
+      <div className="max-w-2xl mx-auto pt-20 text-center">
         <p className="text-sm font-medium text-[hsl(var(--foreground))]">Contact not found</p>
         <p className="text-xs text-[hsl(var(--muted-foreground))] mt-1 mb-4">This contact may have been deleted.</p>
         <button
@@ -62,16 +62,18 @@ export default function ContactDetailPage({ params }: Props) {
   }
 
   return (
-    <div className="max-w-2xl mx-auto flex flex-col gap-5">
+    <div className="max-w-2xl mx-auto space-y-6">
+      {/* ── Back ── */}
       <button
         onClick={() => router.push('/dashboard/contacts')}
-        className="inline-flex items-center gap-1.5 text-xs text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-colors w-fit"
+        className="inline-flex items-center gap-1.5 text-xs text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-colors"
       >
         <ArrowLeft className="w-3.5 h-3.5" />
         All contacts
       </button>
 
-      <div className="rounded-xl border border-[hsl(var(--border))] overflow-hidden">
+      {/* ── Contact card ── */}
+      <div className="rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden">
         <ContactHeader contact={contact} isEditing={isEditing} onEditToggle={() => setIsEditing(e => !e)} />
         <ContactInfoForm key={contact.id} contact={contact} isEditing={isEditing} onSaved={() => setIsEditing(false)} />
         <ContactTags contact={contact} />

@@ -11,8 +11,9 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Search, Plus, Upload, X } from 'lucide-react';
 import { useDebounce } from '@/hooks/useDebounce';
+import { cn } from '@/lib/utils';
 
-// ─── Tag filter chip ──────────────────────────────────────────────────────────
+// ─── Tag chip ─────────────────────────────────────────────────────────────────
 
 const QUICK_TAGS = ['vip', 'lead', 'inactive'];
 
@@ -20,15 +21,15 @@ function TagChip({ label, active, onClick }: { label: string; active: boolean; o
   return (
     <button
       onClick={onClick}
-      className={[
+      className={cn(
         'inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium border transition-colors',
         active
-          ? 'bg-[#22C55E]/20 border-[#22C55E]/40 text-[hsl(var(--green))]'
-          : 'bg-[hsl(var(--muted))] border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]',
-      ].join(' ')}
+          ? 'bg-[hsl(var(--green-dim))] border-[hsl(var(--green)/0.3)] text-[hsl(var(--green))]'
+          : 'bg-transparent border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:border-[hsl(var(--foreground)/0.2)]',
+      )}
     >
       {label}
-      {active && <X className="w-3 h-3" />}
+      {active && <X className="w-3 h-3 ml-0.5" />}
     </button>
   );
 }
@@ -74,47 +75,45 @@ export default function ContactsPage() {
   };
 
   return (
-    <div className="flex flex-col gap-5">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-4">
+    <div className="space-y-8">
+      {/* ── Header ── */}
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-lg font-semibold text-[hsl(var(--foreground))]">Contacts</h1>
+          <p className="text-xs font-medium uppercase tracking-widest text-[hsl(var(--muted-foreground))] mb-1">CRM</p>
+          <h1 className="text-2xl font-bold tracking-tight text-[hsl(var(--foreground))]">Contacts</h1>
           {meta && (
-            <p className="text-xs text-[hsl(var(--muted-foreground))] mt-0.5">
+            <p className="text-sm text-[hsl(var(--muted-foreground))] mt-1">
               {meta.total.toLocaleString()} {meta.total === 1 ? 'contact' : 'contacts'}
             </p>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
+        <div className="flex items-center gap-2 pt-1">
+          <button
             onClick={() => setImportOpen(true)}
-            className="inline-flex items-center gap-2"
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-[var(--radius)] border border-[hsl(var(--border))] text-sm text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))] transition-colors font-medium"
           >
-            <Upload className="w-4 h-4" />
+            <Upload size={14} />
             Import CSV
-          </Button>
-          <Button
-            size="sm"
+          </button>
+          <button
             onClick={() => setAddOpen(true)}
-            className="inline-flex items-center gap-2 bg-[#22C55E]/20 border border-[#22C55E]/30 text-[hsl(var(--green))] hover:bg-[#22C55E]/30"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-[var(--radius)] bg-[hsl(var(--green-dim))] border border-[hsl(var(--green)/0.25)] text-sm text-[hsl(var(--green))] hover:bg-[hsl(var(--green)/0.2)] transition-colors font-medium"
           >
-            <Plus className="w-4 h-4" />
+            <Plus size={15} />
             Add contact
-          </Button>
+          </button>
         </div>
       </div>
 
-      {/* Search + tag filters */}
+      {/* ── Search + filters ── */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[hsl(var(--muted-foreground))]" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[hsl(var(--muted-foreground))]" />
           <Input
             placeholder="Search by name, phone, or email…"
             value={search}
             onChange={handleSearchChange}
-            className="pl-9 text-sm"
+            className="pl-9 h-9 text-sm"
           />
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -124,7 +123,7 @@ export default function ContactsPage() {
         </div>
       </div>
 
-      {/* Table */}
+      {/* ── List ── */}
       <ContactList
         contacts={contacts}
         isLoading={isLoading}
@@ -133,9 +132,9 @@ export default function ContactsPage() {
         onAdd={() => setAddOpen(true)}
       />
 
-      {/* Pagination */}
+      {/* ── Pagination ── */}
       {meta && meta.totalPages > 1 && (
-        <div className="flex items-center justify-between text-xs text-[hsl(var(--muted-foreground))]">
+        <div className="flex items-center justify-between text-xs text-[hsl(var(--muted-foreground))] pt-2">
           <span>
             Page {meta.page} of {meta.totalPages}
           </span>
@@ -150,7 +149,7 @@ export default function ContactsPage() {
         </div>
       )}
 
-      {/* Modals */}
+      {/* ── Modals ── */}
       <AddContactModal open={addOpen} onClose={() => setAddOpen(false)} />
       <ImportContactsModal open={importOpen} onClose={() => setImportOpen(false)} />
     </div>

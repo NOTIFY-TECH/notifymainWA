@@ -33,7 +33,7 @@ import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import { format, parseISO } from 'date-fns';
 
-// ─── Period Selector ──────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const PERIODS: { label: string; value: AnalyticsPeriod }[] = [
   { label: '24h', value: '24h' },
@@ -42,16 +42,12 @@ const PERIODS: { label: string; value: AnalyticsPeriod }[] = [
   { label: '90 days', value: '90d' },
 ];
 
-// ─── Quick Actions ────────────────────────────────────────────────────────────
-
 const QUICK_ACTIONS = [
   { label: 'New Session', href: '/dashboard/sessions', icon: Smartphone, color: 'green' },
   { label: 'New Campaign', href: '/dashboard/campaigns', icon: Megaphone, color: 'purple' },
   { label: 'View Inbox', href: '/dashboard/inbox', icon: MessageSquare, color: 'green' },
   { label: 'Add Contact', href: '/dashboard/contacts', icon: Users, color: 'purple' },
 ] as const;
-
-// ─── Pie Colors ───────────────────────────────────────────────────────────────
 
 const PIE_COLORS = {
   delivered: 'hsl(134 61% 41%)',
@@ -60,7 +56,7 @@ const PIE_COLORS = {
   pending: 'hsl(215 16% 47%)',
 };
 
-// ─── KPI Card ─────────────────────────────────────────────────────────────────
+// ─── Sub-components ───────────────────────────────────────────────────────────
 
 function KpiCard({
   label,
@@ -79,41 +75,37 @@ function KpiCard({
 }) {
   const isPositive = delta !== undefined && delta > 0;
   const isNegative = delta !== undefined && delta < 0;
-  const isNeutral = delta === undefined || delta === 0;
 
   return (
-    <div className="glass card-hover rounded-[var(--radius)] p-5 flex flex-col gap-4">
-      {/* Top row */}
+    <div className="rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 flex flex-col gap-3">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-[hsl(var(--muted-foreground))]">{label}</p>
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[hsl(var(--muted))]">
-          <Icon size={18} className="text-[hsl(var(--green))]" />
+        <p className="text-xs font-medium uppercase tracking-wider text-[hsl(var(--muted-foreground))]">{label}</p>
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[hsl(var(--muted))]">
+          <Icon size={15} className="text-[hsl(var(--green))]" />
         </div>
       </div>
 
-      {/* Value */}
       {loading ? (
-        <div className="h-8 w-24 animate-pulse rounded bg-[hsl(var(--muted))]" />
+        <div className="h-9 w-28 animate-pulse rounded bg-[hsl(var(--muted))]" />
       ) : (
-        <p className="text-2xl sm:text-3xl font-bold text-[hsl(var(--foreground))]">
+        <p className="text-3xl font-bold tracking-tight text-[hsl(var(--foreground))]">
           {typeof value === 'number' ? value.toLocaleString() : value}
-          {suffix && <span className="text-lg ml-1 text-[hsl(var(--muted-foreground))]">{suffix}</span>}
+          {suffix && <span className="text-base ml-1 font-normal text-[hsl(var(--muted-foreground))]">{suffix}</span>}
         </p>
       )}
 
-      {/* Delta */}
       {delta !== undefined && !loading && (
         <div
           className={cn(
-            'flex items-center gap-1 text-xs font-medium',
+            'flex items-center gap-1.5 text-xs font-medium',
             isPositive && 'text-[hsl(var(--green))]',
             isNegative && 'text-[hsl(var(--destructive))]',
-            isNeutral && 'text-[hsl(var(--muted-foreground))]',
+            !isPositive && !isNegative && 'text-[hsl(var(--muted-foreground))]',
           )}
         >
-          {isPositive && <TrendingUp size={13} />}
-          {isNegative && <TrendingDown size={13} />}
-          {isNeutral && <Minus size={13} />}
+          {isPositive && <TrendingUp size={12} />}
+          {isNegative && <TrendingDown size={12} />}
+          {!isPositive && !isNegative && <Minus size={12} />}
           <span>
             {delta > 0 ? '+' : ''}
             {delta}% vs last period
@@ -123,23 +115,6 @@ function KpiCard({
     </div>
   );
 }
-
-// ─── Section Header ───────────────────────────────────────────────────────────
-
-function SectionHeader({ title, href }: { title: string; href?: string }) {
-  return (
-    <div className="flex items-center justify-between mb-4">
-      <h2 className="text-sm font-semibold text-[hsl(var(--foreground))]">{title}</h2>
-      {href && (
-        <Link href={href} className="flex items-center gap-1 text-xs text-[hsl(var(--green))] hover:underline">
-          View all <ArrowRight size={12} />
-        </Link>
-      )}
-    </div>
-  );
-}
-
-// ─── Custom Tooltip ───────────────────────────────────────────────────────────
 
 function ChartTooltip({
   active,
@@ -152,11 +127,11 @@ function ChartTooltip({
 }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="glass rounded-[var(--radius)] p-3 text-xs space-y-1 shadow-xl">
+    <div className="rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 text-xs shadow-xl space-y-1">
       <p className="font-medium text-[hsl(var(--foreground))] mb-2">{label}</p>
       {payload.map(p => (
         <div key={p.name} className="flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full shrink-0" style={{ background: p.color }} />
+          <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ background: p.color }} />
           <span className="text-[hsl(var(--muted-foreground))] capitalize">{p.name}:</span>
           <span className="font-medium text-[hsl(var(--foreground))]">{p.value.toLocaleString()}</span>
         </div>
@@ -165,20 +140,17 @@ function ChartTooltip({
   );
 }
 
-// ─── Skeleton ─────────────────────────────────────────────────────────────────
-
 function ChartSkeleton() {
-  return <div className="h-[260px] w-full animate-pulse rounded-[var(--radius)] bg-[hsl(var(--muted))]" />;
+  return <div className="h-[240px] w-full animate-pulse rounded-[var(--radius)] bg-[hsl(var(--muted))]" />;
 }
 
-// ─── Dashboard Page ───────────────────────────────────────────────────────────
+// ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
   const { user, tenant } = useAuthStore();
   const [period, setPeriod] = useState<AnalyticsPeriod>('7d');
   const tenantId = tenant?.id ?? '';
 
-  // ── Queries ──────────────────────────────────────────────────────────────────
   const {
     data: overviewData,
     isLoading: overviewLoading,
@@ -205,7 +177,6 @@ export default function DashboardPage() {
   const timeSeries = timeSeriesData?.data ?? [];
   const delivery = deliveryData?.data;
 
-  // Format timeseries dates for chart
   const chartData = timeSeries.map(point => ({
     ...point,
     date: (() => {
@@ -217,7 +188,6 @@ export default function DashboardPage() {
     })(),
   }));
 
-  // Format delivery data for pie
   const pieData = delivery
     ? [
         { name: 'Delivered', value: delivery.delivered, key: 'delivered' },
@@ -228,20 +198,19 @@ export default function DashboardPage() {
     : [];
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-8">
       {/* ── Header ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-[hsl(var(--foreground))]">
-            Good {getTimeOfDay()}, <span className="gradient-text"> {user?.firstName ?? 'there'} </span>
-          </h1>
-          <p className="text-sm text-[hsl(var(--muted-foreground))] mt-0.5">
-            Here&apos;s what&apos;s happening with {tenant?.name ?? 'your workspace'}
+          <p className="text-xs font-medium uppercase tracking-widest text-[hsl(var(--muted-foreground))] mb-1">
+            {tenant?.name ?? 'Workspace'}
           </p>
+          <h1 className="text-2xl font-bold tracking-tight text-[hsl(var(--foreground))]">
+            Good {getTimeOfDay()}, <span className="gradient-text">{user?.firstName ?? 'there'}</span>
+          </h1>
         </div>
 
-        {/* Period selector + refresh */}
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
           <div className="flex rounded-[var(--radius)] border border-[hsl(var(--border))] overflow-hidden">
             {PERIODS.map(p => (
               <button
@@ -263,7 +232,7 @@ export default function DashboardPage() {
             className="flex h-8 w-8 items-center justify-center rounded-[var(--radius)] border border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))] transition-colors"
             aria-label="Refresh"
           >
-            <RefreshCw size={14} />
+            <RefreshCw size={13} />
           </button>
         </div>
       </div>
@@ -301,7 +270,9 @@ export default function DashboardPage() {
 
       {/* ── Quick Actions ── */}
       <div>
-        <SectionHeader title="Quick Actions" />
+        <h2 className="text-xs font-semibold uppercase tracking-widest text-[hsl(var(--muted-foreground))] mb-4">
+          Quick actions
+        </h2>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {QUICK_ACTIONS.map(action => {
             const Icon = action.icon;
@@ -310,23 +281,22 @@ export default function DashboardPage() {
                 key={action.href}
                 href={action.href}
                 className={cn(
-                  'flex flex-col items-center justify-center gap-2',
-                  'rounded-[var(--radius)] border border-[hsl(var(--border))]',
-                  'py-5 px-3 text-center',
+                  'flex flex-col items-center justify-center gap-3',
+                  'rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--card))]',
+                  'py-6 px-3 text-center',
                   'transition-all duration-150',
-                  'hover:border-[hsl(var(--green))] hover:bg-[hsl(var(--green-dim))]',
-                  'group',
+                  'hover:border-[hsl(var(--green)/0.5)] hover:bg-[hsl(var(--green-dim))]',
                 )}
               >
                 <div
                   className={cn(
-                    'flex h-10 w-10 items-center justify-center rounded-lg',
+                    'flex h-10 w-10 items-center justify-center rounded-xl',
                     action.color === 'green' ? 'bg-[hsl(var(--green-dim))]' : 'bg-[hsl(var(--purple-dim))]',
                   )}
                 >
                   <Icon
-                    size={20}
-                    className={cn(action.color === 'green' ? 'text-[hsl(var(--green))]' : 'text-[hsl(var(--purple))]')}
+                    size={18}
+                    className={action.color === 'green' ? 'text-[hsl(var(--green))]' : 'text-[hsl(var(--purple))]'}
                   />
                 </div>
                 <span className="text-xs font-medium text-[hsl(var(--foreground))]">{action.label}</span>
@@ -336,44 +306,52 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* ── Charts Row ── */}
+      {/* ── Charts ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Area Chart — spans 2 cols on large */}
-        <div className="lg:col-span-2 glass rounded-[var(--radius)] p-5">
-          <SectionHeader title="Message Activity" href="/dashboard/analytics" />
+        {/* Timeseries */}
+        <div className="lg:col-span-2 rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-sm font-semibold text-[hsl(var(--foreground))]">Message Activity</h2>
+            <Link
+              href="/dashboard/analytics"
+              className="flex items-center gap-1 text-xs text-[hsl(var(--green))] hover:underline"
+            >
+              View all <ArrowRight size={11} />
+            </Link>
+          </div>
           {timeSeriesLoading ? (
             <ChartSkeleton />
           ) : chartData.length === 0 ? (
-            <div className="h-[260px] flex items-center justify-center text-sm text-[hsl(var(--muted-foreground))]">
+            <div className="h-[240px] flex items-center justify-center text-sm text-[hsl(var(--muted-foreground))]">
               No data for this period
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height={260}>
+            <ResponsiveContainer width="100%" height={240}>
               <AreaChart data={chartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorSent" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="hsl(134 61% 41%)" stopOpacity={0.3} />
+                    <stop offset="5%" stopColor="hsl(134 61% 41%)" stopOpacity={0.25} />
                     <stop offset="95%" stopColor="hsl(134 61% 41%)" stopOpacity={0} />
                   </linearGradient>
                   <linearGradient id="colorDelivered" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="hsl(263 70% 56%)" stopOpacity={0.3} />
+                    <stop offset="5%" stopColor="hsl(263 70% 56%)" stopOpacity={0.25} />
                     <stop offset="95%" stopColor="hsl(263 70% 56%)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(215 28% 16%)" />
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(215 28% 14%)" />
                 <XAxis
                   dataKey="date"
-                  tick={{ fontSize: 11, fill: 'hsl(215 16% 47%)' }}
+                  tick={{ fontSize: 11, fill: 'hsl(215 16% 40%)' }}
                   tickLine={false}
                   axisLine={false}
                 />
-                <YAxis tick={{ fontSize: 11, fill: 'hsl(215 16% 47%)' }} tickLine={false} axisLine={false} />
+                <YAxis tick={{ fontSize: 11, fill: 'hsl(215 16% 40%)' }} tickLine={false} axisLine={false} />
                 <Tooltip content={<ChartTooltip />} />
                 <Area
                   type="monotone"
                   dataKey="sent"
                   stroke="hsl(134 61% 41%)"
-                  strokeWidth={2}
+                  strokeWidth={1.5}
                   fill="url(#colorSent)"
                   dot={false}
                 />
@@ -381,7 +359,7 @@ export default function DashboardPage() {
                   type="monotone"
                   dataKey="delivered"
                   stroke="hsl(263 70% 56%)"
-                  strokeWidth={2}
+                  strokeWidth={1.5}
                   fill="url(#colorDelivered)"
                   dot={false}
                 />
@@ -390,24 +368,24 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Pie Chart — delivery rates */}
-        <div className="glass rounded-[var(--radius)] p-5">
-          <SectionHeader title="Delivery Breakdown" />
+        {/* Delivery pie */}
+        <div className="rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6">
+          <h2 className="text-sm font-semibold text-[hsl(var(--foreground))] mb-6">Delivery Breakdown</h2>
           {deliveryLoading ? (
             <ChartSkeleton />
           ) : pieData.length === 0 ? (
-            <div className="h-[260px] flex items-center justify-center text-sm text-[hsl(var(--muted-foreground))]">
+            <div className="h-[240px] flex items-center justify-center text-sm text-[hsl(var(--muted-foreground))]">
               No data for this period
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height={260}>
+            <ResponsiveContainer width="100%" height={240}>
               <PieChart>
                 <Pie
                   data={pieData}
                   cx="50%"
                   cy="45%"
-                  innerRadius={60}
-                  outerRadius={90}
+                  innerRadius={55}
+                  outerRadius={82}
                   paddingAngle={3}
                   dataKey="value"
                 >
@@ -418,13 +396,13 @@ export default function DashboardPage() {
                 <Tooltip
                   formatter={value => [Number(value).toLocaleString(), '']}
                   contentStyle={{
-                    background: 'hsl(215 28% 9%)',
+                    background: 'hsl(215 28% 11%)',
                     border: '1px solid hsl(215 28% 16%)',
                     borderRadius: '0.75rem',
                     fontSize: '12px',
                   }}
                 />
-                <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
+                <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
               </PieChart>
             </ResponsiveContainer>
           )}
@@ -432,14 +410,25 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Active Campaigns placeholder ── */}
-      <div className="glass rounded-[var(--radius)] p-5">
-        <SectionHeader title="Active Campaigns" href="/dashboard/campaigns" />
-        <div className="flex flex-col items-center justify-center py-10 text-center gap-2">
-          <Megaphone size={32} className="text-[hsl(var(--muted-foreground))]" />
-          <p className="text-sm text-[hsl(var(--muted-foreground))]">
-            No active campaigns — campaigns will appear here
-          </p>
-          <Link href="/dashboard/campaigns" className="btn-outline-green px-4 py-2 text-xs mt-2">
+      <div className="rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-sm font-semibold text-[hsl(var(--foreground))]">Active Campaigns</h2>
+          <Link
+            href="/dashboard/campaigns"
+            className="flex items-center gap-1 text-xs text-[hsl(var(--green))] hover:underline"
+          >
+            View all <ArrowRight size={11} />
+          </Link>
+        </div>
+        <div className="flex flex-col items-center justify-center py-10 text-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[hsl(var(--muted))]">
+            <Megaphone size={18} className="text-[hsl(var(--muted-foreground))]" />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-[hsl(var(--foreground))]">No active campaigns</p>
+            <p className="text-xs text-[hsl(var(--muted-foreground))] mt-0.5">Running campaigns will appear here</p>
+          </div>
+          <Link href="/dashboard/campaigns" className="btn-outline-green px-4 py-2 text-xs mt-1">
             Create campaign
           </Link>
         </div>
@@ -447,8 +436,6 @@ export default function DashboardPage() {
     </div>
   );
 }
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getTimeOfDay(): string {
   const h = new Date().getHours();

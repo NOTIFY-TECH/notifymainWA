@@ -30,7 +30,16 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const isFirstLoad = useRef(true);
+
+  // ── "Saved as contact" confirmation state ──────────────────────────────
+  // Tracked alongside which conversationId it was saved for, so switching
+  // conversations automatically invalidates the old confirmation without
+  // needing a useEffect to reset it (avoids the "setState in effect" lint —
+  // see https://react.dev/learn/you-might-not-need-an-effect). The derived
+  // `isSavedForCurrentConv` below is what should actually be rendered.
   const [savedContact, setSavedContact] = useState(false);
+  const [savedContactConvId, setSavedContactConvId] = useState<string | null>(null);
+  const isSavedForCurrentConv = savedContact && savedContactConvId === conversationId;
 
   const { subscribe, unsubscribe } = useWebSocket();
   const { data: conversation } = useConversation(conversationId);
@@ -47,11 +56,6 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
       markAsRead.mutate(conversationId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationId]);
-
-  // ── Reset savedContact state when conversation changes ────────────────────
-  useEffect(() => {
-    setSavedContact(false);
   }, [conversationId]);
 
   // ── Scroll to bottom on first load only ───────────────────────────────────
@@ -250,12 +254,15 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
   // ── Save as contact handler ───────────────────────────────────────────────
   const handleSaveAsContact = useCallback(() => {
     saveAsContact.mutate(conversationId, {
-      onSuccess: () => setSavedContact(true),
+      onSuccess: () => {
+        setSavedContact(true);
+        setSavedContactConvId(conversationId);
+      },
     });
   }, [conversationId, saveAsContact]);
 
   const displayName = conversation?.contact?.name ?? conversation?.contactName ?? conversation?.phoneNumber;
-  const hasContact = !!conversation?.contactId || savedContact;
+  const hasContact = !!conversation?.contactId || isSavedForCurrentConv;
 
   return (
     <div className="flex flex-col h-full">
@@ -295,7 +302,7 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
         )}
 
         {/* Saved confirmation — briefly shown after saving */}
-        {hasContact && savedContact && (
+        {hasContact && isSavedForCurrentConv && (
           <div className="p-2 text-[hsl(var(--green))]" title="Contact saved">
             <Check size={16} />
           </div>

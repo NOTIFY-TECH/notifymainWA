@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { ContactDetail } from '@/services/contacts-api';
 import { useUpdateContact } from '@/hooks/useContacts';
 import { Input } from '@/components/ui/input';
@@ -14,28 +14,28 @@ interface ContactInfoFormProps {
   onSaved: () => void;
 }
 
-export default function ContactInfoForm({ contact, isEditing, onSaved }: ContactInfoFormProps) {
-  const { mutateAsync, isPending } = useUpdateContact(contact.id);
-  const [error, setError] = useState<string | null>(null);
-
-  const [form, setForm] = useState({
+// Builds the editable form state from a contact. Pulled out so it can be
+// used both as the lazy useState initializer and is implicitly re-run on
+// every mount, since the parent page remounts this component via
+// key={contact.id} whenever the contact identity changes. That remount is
+// what keeps the form in sync — no useEffect needed (the previous
+// useEffect-based sync triggered React's set-state-in-effect warning and
+// caused an extra render on every contact load).
+function buildForm(contact: ContactDetail) {
+  return {
     name: contact.name ?? '',
     email: contact.email ?? '',
+    phoneNumber: contact.phoneNumber ?? '',
     notes: contact.notes ?? '',
     isBlocked: contact.isBlocked,
     isOptedOut: contact.isOptedOut,
-  });
+  };
+}
 
-  // Sync if contact prop changes (e.g. after a save)
-  useEffect(() => {
-    setForm({
-      name: contact.name ?? '',
-      email: contact.email ?? '',
-      notes: contact.notes ?? '',
-      isBlocked: contact.isBlocked,
-      isOptedOut: contact.isOptedOut,
-    });
-  }, [contact]);
+export default function ContactInfoForm({ contact, isEditing, onSaved }: ContactInfoFormProps) {
+  const { mutateAsync, isPending } = useUpdateContact(contact.id);
+  const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState(() => buildForm(contact));
 
   const set = (field: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(prev => ({ ...prev, [field]: e.target.value }));
@@ -45,10 +45,12 @@ export default function ContactInfoForm({ contact, isEditing, onSaved }: Contact
   const handleSave = async () => {
     setError(null);
     if (!form.name.trim()) return setError('Name is required.');
+    if (!form.phoneNumber.trim()) return setError('Phone number is required.');
     try {
       await mutateAsync({
         name: form.name.trim(),
         email: form.email.trim() || undefined,
+        phoneNumber: form.phoneNumber.trim(),
         notes: form.notes.trim() || undefined,
         isBlocked: form.isBlocked,
         isOptedOut: form.isOptedOut,
@@ -86,6 +88,13 @@ export default function ContactInfoForm({ contact, isEditing, onSaved }: Contact
           Name <span className="text-red-400">*</span>
         </Label>
         <Input value={form.name} onChange={set('name')} />
+      </div>
+
+      <div className="space-y-1.5">
+        <Label className="text-xs font-medium text-[hsl(var(--muted-foreground))]">
+          Phone <span className="text-red-400">*</span>
+        </Label>
+        <Input value={form.phoneNumber} onChange={set('phoneNumber')} placeholder="e.g. 91XXXXXXXXXX" />
       </div>
 
       <div className="space-y-1.5">

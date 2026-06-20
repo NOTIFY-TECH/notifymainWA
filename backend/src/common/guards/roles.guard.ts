@@ -18,12 +18,18 @@ export class RolesGuard implements CanActivate {
       [context.getHandler(), context.getClass()],
     );
 
-    if (!requiredRoles) return true;
+    // No @Roles() decorator — route is accessible to any authenticated user
+    if (!requiredRoles || requiredRoles.length === 0) return true;
 
     const { user } = context.switchToHttp().getRequest();
 
-    if (!requiredRoles.includes(user.role)) {
-      throw new ForbiddenException('Insufficient permissions');
+    // SUPER_ADMIN bypasses all tenant-level role restrictions
+    if (user?.role === UserRole.SUPER_ADMIN) return true;
+
+    if (!requiredRoles.includes(user?.role)) {
+      throw new ForbiddenException(
+        `This action requires one of: ${requiredRoles.join(', ')}`,
+      );
     }
 
     return true;

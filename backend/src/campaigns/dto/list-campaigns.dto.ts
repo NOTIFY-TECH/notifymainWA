@@ -1,4 +1,12 @@
-import { IsOptional, IsInt, IsString, IsIn, Min, Max } from 'class-validator';
+import {
+  IsOptional,
+  IsInt,
+  IsString,
+  IsIn,
+  IsDateString,
+  Min,
+  Max,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -35,4 +43,22 @@ export class ListCampaignsDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'ISO date string — filters campaigns created on/after this date (inclusive)',
+    example: '2026-06-01',
+  })
+  @IsOptional()
+  @IsDateString()
+  dateFrom?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'ISO date string — filters campaigns created on/before this date (inclusive, end of day)',
+    example: '2026-06-30',
+  })
+  @IsOptional()
+  @IsDateString()
+  dateTo?: string;
 }

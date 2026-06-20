@@ -50,6 +50,7 @@ export interface CreateContactRequest {
 export interface UpdateContactRequest {
   name?: string;
   email?: string;
+  phoneNumber?: string;
   notes?: string;
   isBlocked?: boolean;
   isOptedOut?: boolean;
@@ -64,6 +65,11 @@ export interface ListContactsParams {
   isOptedOut?: boolean;
   sortBy?: 'name' | 'createdAt' | 'lastMessageAt';
   sortOrder?: 'asc' | 'desc';
+}
+
+export interface DistinctTag {
+  tag: string;
+  count: number;
 }
 
 // ─── Contacts API ─────────────────────────────────────────────────────────────
@@ -108,6 +114,13 @@ export const contactsApi = {
 
   async removeTag(tenantId: string, contactId: string, tag: string): Promise<ContactDetail> {
     const response = await api.delete<ContactDetail>(`/tenants/${tenantId}/contacts/${contactId}/tags/${tag}`);
+    return response.data;
+  },
+
+  // ── Feature 5 ─────────────────────────────────────────────────────────────
+
+  async listTags(tenantId: string): Promise<DistinctTag[]> {
+    const response = await api.get<DistinctTag[]>(`/tenants/${tenantId}/contacts/tags`);
     return response.data;
   },
 

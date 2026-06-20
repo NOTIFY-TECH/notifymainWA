@@ -8,16 +8,21 @@ export default function NewCampaignPage() {
   const router = useRouter();
 
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex items-center gap-3">
+    <div className="space-y-8">
+      {/* ── Header ── */}
+      <div>
         <button
           onClick={() => router.back()}
-          className="p-1.5 rounded-lg hover:bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] transition-colors"
+          className="inline-flex items-center gap-1.5 text-xs text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-colors mb-4"
           aria-label="Back"
         >
-          <ArrowLeft size={18} />
+          <ArrowLeft size={13} />
+          Back to campaigns
         </button>
-        <h1 className="text-lg font-semibold text-[hsl(var(--foreground))]">New campaign</h1>
+        <p className="text-xs font-medium uppercase tracking-widest text-[hsl(var(--muted-foreground))] mb-1">
+          Marketing
+        </p>
+        <h1 className="text-2xl font-bold tracking-tight text-[hsl(var(--foreground))]">New campaign</h1>
       </div>
 
       <CreateCampaignForm />

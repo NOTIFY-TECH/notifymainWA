@@ -5,29 +5,21 @@ import { useRouter } from 'next/navigation';
 import { useCampaigns } from '@/hooks/useCampaigns';
 import { ListCampaignsParams, CampaignStatus } from '@/types/campaign';
 import CampaignList from '@/components/campaigns/CampaignList';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Search, Plus, X } from 'lucide-react';
+import { FilterBar, FilterChip } from '@/components/ui/filter-bar';
+import { Plus } from 'lucide-react';
 import { useDebounce } from '@/hooks/useDebounce';
 
-const STATUS_FILTERS: CampaignStatus[] = ['RUNNING', 'SCHEDULED', 'COMPLETED', 'CANCELLED'];
+// ─── Filter config ────────────────────────────────────────────────────────────
 
-function StatusChip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className={[
-        'inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium border transition-colors',
-        active
-          ? 'bg-[hsl(var(--purple))]/20 border-[hsl(var(--purple))]/40 text-[hsl(var(--purple))]'
-          : 'bg-[hsl(var(--muted))] border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]',
-      ].join(' ')}
-    >
-      {label}
-      {active && <X className="w-3 h-3" />}
-    </button>
-  );
-}
+const STATUS_CHIPS: FilterChip<CampaignStatus>[] = [
+  { value: 'RUNNING', label: 'Running' },
+  { value: 'SCHEDULED', label: 'Scheduled' },
+  { value: 'COMPLETED', label: 'Completed' },
+  { value: 'CANCELLED', label: 'Cancelled' },
+];
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function CampaignsPage() {
   const router = useRouter();
@@ -49,62 +41,53 @@ export default function CampaignsPage() {
   const meta = data?.meta;
   const hasFilters = !!debouncedSearch || !!statusFilter;
 
-  const toggleStatus = (status: CampaignStatus) => {
+  const handleSearchChange = (value: string) => {
+    setSearch(value);
+    setPage(1);
+  };
+
+  const handleChipToggle = (status: CampaignStatus) => {
     setStatusFilter(prev => (prev === status ? null : status));
     setPage(1);
   };
 
-  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSearch(e.target.value);
-    setPage(1);
-  };
-
   return (
-    <div className="flex flex-col gap-5">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-4">
+    <div className="space-y-8">
+      {/* ── Header ── */}
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-lg font-semibold text-[hsl(var(--foreground))]">Campaigns</h1>
+          <p className="text-xs font-medium uppercase tracking-widest text-[hsl(var(--muted-foreground))] mb-1">
+            Marketing
+          </p>
+          <h1 className="text-2xl font-bold tracking-tight text-[hsl(var(--foreground))]">Campaigns</h1>
           {meta && (
-            <p className="text-xs text-[hsl(var(--muted-foreground))] mt-0.5">
+            <p className="text-sm text-[hsl(var(--muted-foreground))] mt-1">
               {meta.total.toLocaleString()} {meta.total === 1 ? 'campaign' : 'campaigns'}
             </p>
           )}
         </div>
-        <Button
-          size="sm"
-          onClick={() => router.push('/dashboard/campaigns/new')}
-          className="inline-flex items-center gap-2 bg-[hsl(var(--purple))]/20 border border-[hsl(var(--purple))]/30 text-[hsl(var(--purple))] hover:bg-[hsl(var(--purple))]/30"
-        >
-          <Plus className="w-4 h-4" />
-          New campaign
-        </Button>
-      </div>
-
-      {/* Search + status filters */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[hsl(var(--muted-foreground))]" />
-          <Input
-            placeholder="Search campaigns…"
-            value={search}
-            onChange={handleSearchChange}
-            className="pl-9 text-sm"
-          />
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {STATUS_FILTERS.map(status => (
-            <StatusChip
-              key={status}
-              label={status.charAt(0) + status.slice(1).toLowerCase()}
-              active={statusFilter === status}
-              onClick={() => toggleStatus(status)}
-            />
-          ))}
+        <div className="pt-1">
+          <button
+            onClick={() => router.push('/dashboard/campaigns/new')}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-[var(--radius)] bg-[hsl(var(--purple-dim))] border border-[hsl(var(--purple)/0.25)] text-sm text-[hsl(var(--purple))] hover:bg-[hsl(var(--purple)/0.2)] transition-colors font-medium"
+          >
+            <Plus size={15} />
+            New campaign
+          </button>
         </div>
       </div>
 
-      {/* List */}
+      {/* ── Filters ── */}
+      <FilterBar
+        searchValue={search}
+        onSearchChange={handleSearchChange}
+        searchPlaceholder="Search campaigns…"
+        chips={STATUS_CHIPS}
+        activeChip={statusFilter}
+        onChipToggle={handleChipToggle}
+      />
+
+      {/* ── List ── */}
       <CampaignList
         campaigns={campaigns}
         isLoading={isLoading}
@@ -113,9 +96,9 @@ export default function CampaignsPage() {
         onCreate={() => router.push('/dashboard/campaigns/new')}
       />
 
-      {/* Pagination */}
+      {/* ── Pagination ── */}
       {meta && meta.totalPages > 1 && (
-        <div className="flex items-center justify-between text-xs text-[hsl(var(--muted-foreground))]">
+        <div className="flex items-center justify-between text-xs text-[hsl(var(--muted-foreground))] pt-2">
           <span>
             Page {meta.page} of {meta.totalPages}
           </span>
