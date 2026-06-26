@@ -11,6 +11,10 @@ export interface Campaign {
   messageTemplate: string;
   mediaUrl: string | null;
   mediaType: string | null;
+  // URL sent as a separate plain-text message after the media+caption so
+  // WhatsApp renders it as a link-preview card. Only applies when mediaUrl
+  // is also set — text-only campaigns do not use this field.
+  linkUrl: string | null;
   scheduledAt: string | null;
   startedAt: string | null;
   completedAt: string | null;
@@ -33,6 +37,10 @@ export interface CampaignContact {
   id: string;
   phoneNumber: string;
   status: CampaignContactStatus;
+  // messageId links this row to the Message that was sent for this recipient.
+  // Used by the frontend to match message:ack WebSocket events to the correct
+  // CampaignContact row so the status table updates live.
+  messageId: string | null;
   sentAt: string | null;
   deliveredAt: string | null;
   readAt: string | null;
@@ -51,6 +59,9 @@ export interface CreateCampaignRequest {
   messageTemplate: string;
   mediaUrl?: string;
   mediaType?: string;
+  // Optional URL to send as a separate link-preview card message after the
+  // media+caption. Only meaningful when mediaUrl is also provided.
+  linkUrl?: string;
   contactIds?: string[];
   tags?: string[];
   scheduledAt?: string;
@@ -67,6 +78,7 @@ export interface UpdateCampaignRequest {
   messageTemplate?: string;
   mediaUrl?: string;
   mediaType?: string;
+  linkUrl?: string | null;
   scheduledAt?: string | null;
   rateLimitPerMin?: number;
 }

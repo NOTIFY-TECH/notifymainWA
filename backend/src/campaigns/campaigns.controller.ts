@@ -70,7 +70,7 @@ export class CampaignsController {
 
   // POST /tenants/:tenantId/campaigns
   @Post()
-  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   createCampaign(
     @Param('tenantId') tenantId: string,
     @Body() dto: CreateCampaignDto,
@@ -95,13 +95,9 @@ export class CampaignsController {
   }
 
   // PATCH /tenants/:tenantId/campaigns/:campaignId
-  //
-  // Edits a DRAFT/SCHEDULED campaign's message, media, session, schedule,
-  // or rate limit. Recipients are NOT editable here — use POST :campaignId/contacts
-  // or the CSV endpoint for that.
   @Patch(':campaignId')
   @ApiOperation({ summary: 'Edit a draft or scheduled campaign' })
-  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   updateCampaign(
     @Param('tenantId') tenantId: string,
     @Param('campaignId') campaignId: string,
@@ -111,14 +107,10 @@ export class CampaignsController {
   }
 
   // POST /tenants/:tenantId/campaigns/:campaignId/launch
-  //
-  // Starts sending a DRAFT/SCHEDULED campaign that has at least one
-  // recipient attached. See CampaignsService.launchCampaign for the
-  // immediate-vs-scheduled branching logic.
   @Post(':campaignId/launch')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Launch a draft campaign (starts sending)' })
-  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   launchCampaign(
     @Param('tenantId') tenantId: string,
     @Param('campaignId') campaignId: string,
@@ -127,23 +119,13 @@ export class CampaignsController {
   }
 
   // POST /tenants/:tenantId/campaigns/:campaignId/contacts
-  //
-  // Adds recipients to an existing DRAFT/SCHEDULED campaign via contactIds
-  // and/or tags — reuses the same resolution logic as createCampaign
-  // (CampaignsService.resolveRecipients). For CSV-based addition, use the
-  // existing POST :campaignId/recipients/csv endpoint instead.
-  //
-  // NOTE: this route was previously missing from the controller — the
-  // service method (addContactsToCampaign) existed but had no route wired
-  // to it, causing a framework-level 404 ("Cannot POST .../contacts") on
-  // every campaign, not just cloned ones.
   @Post(':campaignId/contacts')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
       'Add recipients to a draft/scheduled campaign via contactIds or tags',
   })
-  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   addContacts(
     @Param('tenantId') tenantId: string,
     @Param('campaignId') campaignId: string,
@@ -159,7 +141,7 @@ export class CampaignsController {
   // POST /tenants/:tenantId/campaigns/:campaignId/cancel
   @Post(':campaignId/cancel')
   @HttpCode(HttpStatus.OK)
-  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   cancelCampaign(
     @Param('tenantId') tenantId: string,
     @Param('campaignId') campaignId: string,
@@ -168,16 +150,12 @@ export class CampaignsController {
   }
 
   // POST /tenants/:tenantId/campaigns/:campaignId/retry-failed
-  //
-  // Re-queues only the FAILED CampaignContact rows for a fresh send attempt.
-  // Only valid from COMPLETED status — see CampaignsService.retryFailedCampaign
-  // for the full reasoning on that restriction.
   @Post(':campaignId/retry-failed')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Retry only the failed recipients of a completed campaign',
   })
-  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   retryFailedCampaign(
     @Param('tenantId') tenantId: string,
     @Param('campaignId') campaignId: string,
@@ -186,17 +164,12 @@ export class CampaignsController {
   }
 
   // POST /tenants/:tenantId/campaigns/:campaignId/clone
-  //
-  // Copies name/messageTemplate/mediaUrl/sessionId into a new DRAFT campaign
-  // with zero contacts. req.user.userId becomes the clone's createdById —
-  // matches the same field used in createCampaign above, not copied from
-  // the original campaign's creator.
   @Post(':campaignId/clone')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Clone a campaign as a new draft with no contacts attached',
   })
-  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   cloneCampaign(
     @Param('tenantId') tenantId: string,
     @Param('campaignId') campaignId: string,
@@ -210,15 +183,6 @@ export class CampaignsController {
   }
 
   // POST /tenants/:tenantId/campaigns/:campaignId/recipients/csv
-  //
-  // Accepts a multipart/form-data request with a single 'file' field
-  // containing a .csv file. Parses the phoneNumber column and creates
-  // CampaignContact rows for the given campaign.
-  //
-  // Uses memoryStorage so the CSV buffer is available directly without
-  // writing to disk — consistent with how ContactsService.importContacts
-  // receives its buffer. The MediaModule's disk-storage multer config is
-  // NOT shared here by design.
   @Post(':campaignId/recipients/csv')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -231,14 +195,11 @@ export class CampaignsController {
       limits: { fileSize: MAX_CSV_SIZE_BYTES },
     }),
   )
-  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   async importRecipientsCsv(
     @Param('tenantId', ParseUUIDPipe) tenantId: string,
     @Param('campaignId', ParseUUIDPipe) campaignId: string,
     @UploadedFile() file: Express.Multer.File,
-    // ImportRecipientsDto referenced here only to attach the Swagger
-    // file-field descriptor — NestJS ApiBody picks it up via @ApiConsumes above.
-
     @Body() _body: ImportRecipientsDto,
   ) {
     if (!file) {
@@ -253,8 +214,6 @@ export class CampaignsController {
       );
     }
 
-    // file.size check is belt-and-suspenders — multer limits already enforce
-    // MAX_CSV_SIZE_BYTES above, but surface a clean message just in case.
     if (file.size > MAX_CSV_SIZE_BYTES) {
       throw new BadRequestException(
         `File too large. Maximum size is ${MAX_CSV_SIZE_BYTES / 1024 / 1024}MB.`,

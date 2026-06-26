@@ -119,11 +119,6 @@ export function useDistinctTags() {
 }
 
 // ─── useEstimatedTagCount ───────────────────────────────────────────────────
-//
-// Reuses the existing contacts list endpoint with limit: 1 purely to read
-// meta.total. Avoids a dedicated count endpoint for what's just a live
-// estimate shown while picking tags in ContactSelector. Shares cache with
-// useContacts since the query key is identical for identical params.
 
 export function useEstimatedTagCount(tags: string[]) {
   const tenantId = useAuthStore.getState().tenant?.id ?? '';
@@ -138,15 +133,25 @@ export function useEstimatedTagCount(tags: string[]) {
 }
 
 // ─── useDeleteContact ─────────────────────────────────────────────────────────
+//
+// Reads tenantId inside mutationFn (not at hook init time) to avoid the
+// stale-snapshot bug where the store hasn't hydrated yet when the hook
+// mounts, leaving tenantId as '' and sending DELETE to /tenants//contacts/:id.
+// Same pattern used in useTenant.ts (fixed session 9).
 
 export function useDeleteContact() {
-  const tenantId = useAuthStore.getState().tenant?.id ?? '';
   const queryClient = useQueryClient();
   const router = useRouter();
 
   return useMutation({
-    mutationFn: (contactId: string) => contactsApi.remove(tenantId, contactId),
+    mutationFn: (contactId: string) => {
+      // Read tenantId at call time — store is guaranteed hydrated by the
+      // time the user can click the delete button.
+      const tenantId = useAuthStore.getState().tenant?.id ?? '';
+      return contactsApi.remove(tenantId, contactId);
+    },
     onSuccess: (_, contactId) => {
+      const tenantId = useAuthStore.getState().tenant?.id ?? '';
       queryClient.removeQueries({ queryKey: contactKeys.detail(tenantId, contactId) });
       queryClient.setQueriesData<PaginatedResponse<Contact>>({ queryKey: contactKeys.list(tenantId) }, old => {
         if (!old) return old;
@@ -160,6 +165,7 @@ export function useDeleteContact() {
     },
   });
 }
+
 // ─── useCreateContactFromConversation ─────────────────────────────────────────
 
 export function useCreateContactFromConversation() {

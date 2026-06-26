@@ -35,7 +35,7 @@ export class SessionsController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   async createSession(
     @Param('tenantId') tenantId: string,
     @Body() dto: CreateSessionDto,
@@ -86,7 +86,7 @@ export class SessionsController {
   // Reconnect using existing WhatsApp auth — no QR if auth still valid
   @Post(':sessionId/reconnect')
   @HttpCode(HttpStatus.OK)
-  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   async reconnectSession(
     @Param('tenantId') tenantId: string,
     @Param('sessionId') sessionId: string,
@@ -97,7 +97,7 @@ export class SessionsController {
   // Unlink WhatsApp number — clears auth so next scan links a new number
   @Post(':sessionId/unlink')
   @HttpCode(HttpStatus.OK)
-  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   async unlinkSession(
     @Param('tenantId') tenantId: string,
     @Param('sessionId') sessionId: string,
@@ -107,7 +107,7 @@ export class SessionsController {
 
   @Delete(':sessionId')
   @HttpCode(HttpStatus.OK)
-  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   async deleteSession(
     @Param('tenantId') tenantId: string,
     @Param('sessionId') sessionId: string,

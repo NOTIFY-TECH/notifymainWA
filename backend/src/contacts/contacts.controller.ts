@@ -115,7 +115,7 @@ export class ContactsController {
   }
 
   @Patch(':contactId')
-  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   updateContact(
     @Param('tenantId') tenantId: string,
     @Param('contactId') contactId: string,
@@ -147,7 +147,7 @@ export class ContactsController {
 
   @Delete(':contactId')
   @HttpCode(HttpStatus.OK)
-  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   deleteContact(
     @Param('tenantId') tenantId: string,
     @Param('contactId') contactId: string,

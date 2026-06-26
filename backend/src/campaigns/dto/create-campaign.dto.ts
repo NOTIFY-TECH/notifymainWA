@@ -4,6 +4,7 @@ import {
   IsArray,
   IsInt,
   IsDateString,
+  IsUrl,
   Min,
   Max,
   MaxLength,
@@ -36,6 +37,15 @@ export class CreateCampaignDto {
   @IsOptional()
   @IsString()
   mediaType?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'A URL to be sent as a separate plain-text message after the media+caption, ' +
+      'so WhatsApp renders it as a link-preview card.',
+  })
+  @IsOptional()
+  @IsString()
+  linkUrl?: string;
 
   @ApiPropertyOptional({ type: [String] })
   @IsOptional()

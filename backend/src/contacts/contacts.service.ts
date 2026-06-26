@@ -364,6 +364,12 @@ export class ContactsService {
 
     const phoneNumber = conversation.phoneNumber;
 
+    // Strip @lid / @s.whatsapp.net suffix for display name — phoneNumber
+    // on a conversation may be a raw JID, not a clean digit string.
+    const displayName = phoneNumber.includes('@')
+      ? phoneNumber.split('@')[0]
+      : phoneNumber;
+
     const existing = await this.prisma.contact.findFirst({
       where: { tenantId, phoneNumber, deletedAt: null },
     });
@@ -373,7 +379,7 @@ export class ContactsService {
       contact = existing;
     } else {
       contact = await this.prisma.contact.create({
-        data: { tenantId, phoneNumber, name: phoneNumber },
+        data: { tenantId, phoneNumber, name: displayName }, // ← fixed
       });
     }
 

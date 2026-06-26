@@ -9,14 +9,13 @@ import {
   MessageSquare,
   Users,
   Smartphone,
-  Megaphone,
   TrendingUp,
   TrendingDown,
   Minus,
   RefreshCw,
-  UserCheck,
-  Clock,
-  Send,
+  ArrowDownLeft,
+  ArrowUpRight,
+  MessagesSquare,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -29,10 +28,9 @@ import {
   PieChart,
   Pie,
   Cell,
-  Legend,
 } from 'recharts';
 import { cn } from '@/lib/utils';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, formatDistanceToNow } from 'date-fns';
 
 // ─── Period Selector ──────────────────────────────────────────────────────────
 
@@ -43,7 +41,7 @@ const PERIODS: { label: string; value: AnalyticsPeriod }[] = [
   { label: '90 days', value: '90d' },
 ];
 
-// ─── Pie Colors ───────────────────────────────────────────────────────────────
+// ─── Colors ───────────────────────────────────────────────────────────────────
 
 const PIE_COLORS = {
   delivered: 'hsl(134 61% 41%)',
@@ -52,22 +50,29 @@ const PIE_COLORS = {
   pending: 'hsl(215 16% 47%)',
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+const STATUS_STYLES: Record<string, string> = {
+  DELIVERED: 'bg-[hsl(var(--green-dim))] text-[hsl(var(--green))]',
+  READ: 'bg-[hsl(var(--purple-dim))] text-[hsl(var(--purple))]',
+  FAILED: 'bg-red-500/10 text-red-400',
+  SENT: 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]',
+  PENDING: 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]',
+};
 
-function formatResponseTime(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  const totalSeconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  if (minutes === 0) return `${seconds}s`;
-  return `${minutes}m ${seconds}s`;
-}
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatDate(dateStr: string, period: AnalyticsPeriod): string {
   try {
     return format(parseISO(dateStr), period === '24h' ? 'HH:mm' : 'MMM d');
   } catch {
     return dateStr;
+  }
+}
+
+function timeAgo(iso: string): string {
+  try {
+    return formatDistanceToNow(parseISO(iso), { addSuffix: true });
+  } catch {
+    return iso;
   }
 }
 
@@ -131,13 +136,11 @@ function KpiCard({
   );
 }
 
-// ─── Chart Skeleton ───────────────────────────────────────────────────────────
+// ─── Skeletons ────────────────────────────────────────────────────────────────
 
 function ChartSkeleton({ height = 280 }: { height?: number }) {
   return <div className="w-full animate-pulse rounded-[var(--radius)] bg-[hsl(var(--muted))]" style={{ height }} />;
 }
-
-// ─── Empty Chart ──────────────────────────────────────────────────────────────
 
 function EmptyChart({ height = 280 }: { height?: number }) {
   return (
@@ -147,7 +150,7 @@ function EmptyChart({ height = 280 }: { height?: number }) {
   );
 }
 
-// ─── Custom Tooltip ───────────────────────────────────────────────────────────
+// ─── Custom Chart Tooltip ─────────────────────────────────────────────────────
 
 function ChartTooltip({
   active,
@@ -173,6 +176,119 @@ function ChartTooltip({
   );
 }
 
+// ─── Recent Activity Panel ─────────────────────────────────────────────────────
+// Single merged panel — replaces the former "Recent Conversations" +
+// "Recent Messages" pair, which both queried the exact same getRecentMessages
+// feed and only differed by client-side dedup, causing the same info to show
+// twice. This panel dedupes by contact (most recent message per contact) so
+// each row is a distinct conversation, while still showing the full message
+// detail (direction, body, status, time) that the old "Recent Messages" panel
+// had. Full-width — no more two half-width columns showing overlapping data.
+
+function RecentActivityPanel({ tenantId }: { tenantId: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['analytics', 'recent-messages', tenantId],
+    queryFn: () => analyticsApi.getRecentMessages(tenantId, 30),
+    enabled: !!tenantId,
+    refetchInterval: 30_000,
+  });
+
+  const messages = data?.data ?? [];
+
+  // Deduplicate by displayName — keep only the most recent message per contact
+  const activity = (() => {
+    const seen = new Set<string>();
+    const result: typeof messages = [];
+    for (const msg of messages) {
+      if (seen.has(msg.displayName)) continue;
+      seen.add(msg.displayName);
+      result.push(msg);
+      if (result.length >= 12) break;
+    }
+    return result;
+  })();
+
+  return (
+    <div className="glass rounded-[var(--radius)] p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-sm font-semibold text-[hsl(var(--foreground))]">Recent Activity</h2>
+        <span className="text-[11px] text-[hsl(var(--muted-foreground))]/60">Auto-refreshes every 30s</span>
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-3">
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="h-14 w-full animate-pulse rounded-[var(--radius)] bg-[hsl(var(--muted))]" />
+          ))}
+        </div>
+      ) : activity.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-10 gap-2 text-center">
+          <MessagesSquare size={32} className="text-[hsl(var(--muted-foreground))]" />
+          <p className="text-sm text-[hsl(var(--muted-foreground))]">No activity yet</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 divide-y sm:divide-y-0 divide-[hsl(var(--border))]">
+          {activity.map(item => {
+            const isInbound = item.direction === 'INBOUND';
+            return (
+              <div
+                key={item.id}
+                className="flex items-center gap-3 py-3 sm:border-b sm:border-[hsl(var(--border))] last:border-b-0"
+              >
+                {/* Avatar */}
+                <div
+                  className={cn(
+                    'flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold uppercase',
+                    isInbound
+                      ? 'bg-[hsl(var(--green))]/10 text-[hsl(var(--green))]'
+                      : 'bg-[hsl(var(--purple))]/10 text-[hsl(var(--purple))]',
+                  )}
+                >
+                  {item.displayName.charAt(0)}
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2 mb-0.5">
+                    <span className="text-xs font-semibold text-[hsl(var(--foreground))] truncate">
+                      {item.displayName}
+                    </span>
+                    <span className="shrink-0 text-[11px] text-[hsl(var(--muted-foreground))]/60">
+                      {timeAgo(item.createdAt)}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    {isInbound ? (
+                      <ArrowDownLeft size={11} className="shrink-0 text-[hsl(var(--green))]" />
+                    ) : (
+                      <ArrowUpRight size={11} className="shrink-0 text-[hsl(var(--purple))]" />
+                    )}
+                    <p className="text-xs text-[hsl(var(--muted-foreground))] truncate">
+                      {item.body || <span className="italic">Media message</span>}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Outbound status badge */}
+                {!isInbound && item.status && (
+                  <span
+                    className={cn(
+                      'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide',
+                      STATUS_STYLES[item.status] ?? STATUS_STYLES['PENDING'],
+                    )}
+                  >
+                    {item.status.toLowerCase()}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Analytics Page ───────────────────────────────────────────────────────────
 
 export default function AnalyticsPage() {
@@ -180,7 +296,6 @@ export default function AnalyticsPage() {
   const [period, setPeriod] = useState<AnalyticsPeriod>('7d');
   const tenantId = tenant?.id ?? '';
 
-  // ── Queries ───────────────────────────────────────────────────────────────────
   const {
     data: overviewData,
     isLoading: overviewLoading,
@@ -203,17 +318,9 @@ export default function AnalyticsPage() {
     enabled: !!tenantId,
   });
 
-  const { data: agentData, isLoading: agentLoading } = useQuery({
-    queryKey: ['analytics', 'agents', tenantId, period],
-    queryFn: () => analyticsApi.getAgentStats(tenantId, period),
-    enabled: !!tenantId,
-  });
-
-  // ── Derived data ──────────────────────────────────────────────────────────────
   const overview = overviewData?.data;
   const timeSeries = timeSeriesData?.data ?? [];
   const delivery = deliveryData?.data;
-  const agents = agentData?.data ?? [];
 
   const chartData = timeSeries.map(point => ({
     ...point,
@@ -241,8 +348,6 @@ export default function AnalyticsPage() {
             Message performance and delivery insights for {tenant?.name ?? 'your workspace'}
           </p>
         </div>
-
-        {/* Period selector + refresh */}
         <div className="flex items-center gap-2">
           <div className="flex rounded-[var(--radius)] border border-[hsl(var(--border))] overflow-hidden">
             {PERIODS.map(p => (
@@ -303,7 +408,7 @@ export default function AnalyticsPage() {
 
       {/* ── Charts Row ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Timeseries — 2/3 width */}
+        {/* Timeseries */}
         <div className="lg:col-span-2 glass rounded-[var(--radius)] p-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-[hsl(var(--foreground))]">Message Activity</h2>
@@ -322,7 +427,6 @@ export default function AnalyticsPage() {
               </span>
             </div>
           </div>
-
           {timeSeriesLoading ? (
             <ChartSkeleton />
           ) : chartData.length === 0 ? (
@@ -382,7 +486,7 @@ export default function AnalyticsPage() {
           )}
         </div>
 
-        {/* Delivery Breakdown — 1/3 width */}
+        {/* Delivery Breakdown */}
         <div className="glass rounded-[var(--radius)] p-5">
           <h2 className="text-sm font-semibold text-[hsl(var(--foreground))] mb-4">Delivery Breakdown</h2>
           {deliveryLoading ? (
@@ -417,8 +521,6 @@ export default function AnalyticsPage() {
                   />
                 </PieChart>
               </ResponsiveContainer>
-
-              {/* Legend rows */}
               <div className="mt-2 space-y-2">
                 {pieData.map(entry => {
                   const total = pieData.reduce((s, d) => s + d.value, 0);
@@ -447,87 +549,8 @@ export default function AnalyticsPage() {
         </div>
       </div>
 
-      {/* ── Agent Performance ── */}
-      <div className="glass rounded-[var(--radius)] p-5">
-        <h2 className="text-sm font-semibold text-[hsl(var(--foreground))] mb-4">Agent Performance</h2>
-
-        {agentLoading ? (
-          <div className="space-y-3">
-            {[...Array(3)].map((_, i) => (
-              <div key={i} className="h-12 w-full animate-pulse rounded-[var(--radius)] bg-[hsl(var(--muted))]" />
-            ))}
-          </div>
-        ) : agents.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-10 gap-2 text-center">
-            <UserCheck size={32} className="text-[hsl(var(--muted-foreground))]" />
-            <p className="text-sm text-[hsl(var(--muted-foreground))]">No agent activity in this period</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-[hsl(var(--border))]">
-                  <th className="pb-3 text-left text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider">
-                    Agent
-                  </th>
-                  <th className="pb-3 text-right text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider">
-                    <span className="flex items-center justify-end gap-1">
-                      <MessageSquare size={11} />
-                      Conversations
-                    </span>
-                  </th>
-                  <th className="pb-3 text-right text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider">
-                    <span className="flex items-center justify-end gap-1">
-                      <Send size={11} />
-                      Replies
-                    </span>
-                  </th>
-                  <th className="pb-3 text-right text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider">
-                    <span className="flex items-center justify-end gap-1">
-                      <Clock size={11} />
-                      Avg Response
-                    </span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[hsl(var(--border))]">
-                {agents.map(agent => (
-                  <tr key={agent.agentId} className="group hover:bg-[hsl(var(--muted)/0.4)] transition-colors">
-                    <td className="py-3 pr-4">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[hsl(var(--muted))] text-xs font-semibold uppercase text-[hsl(var(--foreground))]">
-                          {agent.agentName.charAt(0)}
-                        </div>
-                        <span className="font-medium text-[hsl(var(--foreground))]">{agent.agentName}</span>
-                      </div>
-                    </td>
-                    <td className="py-3 text-right font-medium text-[hsl(var(--foreground))]">
-                      {agent.conversationsHandled.toLocaleString()}
-                    </td>
-                    <td className="py-3 text-right font-medium text-[hsl(var(--foreground))]">
-                      {agent.messagesReplied.toLocaleString()}
-                    </td>
-                    <td className="py-3 text-right">
-                      <span
-                        className={cn(
-                          'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
-                          agent.avgResponseTimeMs < 60_000
-                            ? 'bg-[hsl(var(--green-dim))] text-[hsl(var(--green))]'
-                            : agent.avgResponseTimeMs < 300_000
-                              ? 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]'
-                              : 'bg-red-500/10 text-red-400',
-                        )}
-                      >
-                        {formatResponseTime(agent.avgResponseTimeMs)}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      {/* ── Recent Activity — single merged panel, full width ── */}
+      <RecentActivityPanel tenantId={tenantId} />
     </div>
   );
 }

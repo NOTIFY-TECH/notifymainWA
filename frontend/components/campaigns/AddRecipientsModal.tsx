@@ -27,8 +27,6 @@ export default function AddRecipientsModal({ open, onOpenChange, campaignId }: A
 
   const addContacts = useAddCampaignContacts(campaignId);
 
-  // Derive active mode from which selection has content.
-  // ContactSelector manages its own tab state internally so we check all three.
   const hasSelection = selectedIds.length > 0 || selectedTags.length > 0 || csvFile !== null;
 
   const resetState = () => {
@@ -47,10 +45,8 @@ export default function AddRecipientsModal({ open, onOpenChange, campaignId }: A
       { contactIds: selectedIds, tags: selectedTags, csvFile: csvFile ?? undefined },
       {
         onSuccess: result => {
-          const added = csvFile ? result.data.addedCount : result.data.addedCount;
+          const added = result.data.addedCount;
           handleOpenChange(false);
-          // Toast-style feedback would go here once a toast system is added.
-          // For now the cache update on the detail page makes the result visible immediately.
           console.info(`Added ${added} recipient(s) to campaign ${campaignId}`);
         },
       },
@@ -59,7 +55,7 @@ export default function AddRecipientsModal({ open, onOpenChange, campaignId }: A
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Add recipients</DialogTitle>
           <DialogDescription>
@@ -67,14 +63,17 @@ export default function AddRecipientsModal({ open, onOpenChange, campaignId }: A
           </DialogDescription>
         </DialogHeader>
 
-        <ContactSelector
-          selectedIds={selectedIds}
-          onSelectedIdsChange={setSelectedIds}
-          csvFile={csvFile}
-          onCsvFileChange={setCsvFile}
-          selectedTags={selectedTags}
-          onSelectedTagsChange={setSelectedTags}
-        />
+        {/* Explicit height so ContactSelector's h-full / absolute inset-0 panels resolve correctly */}
+        <div className="h-[320px]">
+          <ContactSelector
+            selectedIds={selectedIds}
+            onSelectedIdsChange={setSelectedIds}
+            csvFile={csvFile}
+            onCsvFileChange={setCsvFile}
+            selectedTags={selectedTags}
+            onSelectedTagsChange={setSelectedTags}
+          />
+        </div>
 
         <DialogFooter showCloseButton>
           <Button

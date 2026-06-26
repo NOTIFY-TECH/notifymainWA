@@ -34,6 +34,12 @@ export class WebhooksProcessor extends WorkerHost {
       case 'session.disconnected':
         await this.handleSessionDisconnected(job.data);
         break;
+      case 'session.sync_start':
+        await this.handleSessionSyncStart(job.data);
+        break;
+      case 'session.chats_synced':
+        await this.handleSessionChatsSynced(job.data);
+        break;
       case 'message.received':
         await this.handleMessageReceived(job.data);
         break;
@@ -107,20 +113,179 @@ export class WebhooksProcessor extends WorkerHost {
     this.logger.log(`Session disconnected: ${data.sessionId}`);
   }
 
-  // ── Resolve a real, normalised phone number to match against Contact ─────
+  // ── Chat list sync: signals frontend that sync is starting ───────────────
+  private async handleSessionSyncStart(data: any): Promise<void> {
+    const session = await this.prisma.session.findFirst({
+      where: { openwaId: data.sessionId },
+      select: { tenantId: true },
+    });
+
+    if (!session) {
+      this.logger.warn(
+        `session.sync_start — session not found: ${data.sessionId}`,
+      );
+      return;
+    }
+
+    this.gatewayService.emitSessionSyncing(session.tenantId, {
+      sessionId: data.sessionId,
+    });
+
+    this.logger.log(`Session sync started: ${data.sessionId}`);
+  }
+
+  // ── Safely re-attach or delete orphaned null-sessionId conversations ──────
   //
-  // `fromNumber`/`toNumber` are full addressable JIDs and may be a @lid
-  // (WhatsApp privacy ID) that bears NO relation to a phone number — Baileys
-  // explicitly cannot decode a LID back to one. Comparing that directly
-  // against Contact.phoneNumber (always a real, normalised number) silently
-  // never matches for @lid chats, which is why contacts with a real saved
-  // number never linked to their inbox conversation.
-  //
-  // The engine (SessionManager._handleIncomingMessage) already resolves and
-  // attaches the real number as payload.pn whenever WhatsApp reveals it
-  // (msg.key.senderPn / participantPn) — prefer that. Falls back to the JID
-  // itself only for older/non-LID chats where it's already a real-number JID
-  // (e.g. ...@s.whatsapp.net with digits WhatsApp app numbers).
+  // The naive updateMany(sessionId: null → sessionId) fails with a unique
+  // constraint error when a live row for (tenantId, sessionId, phoneNumber)
+  // already exists — i.e. both an orphan AND a keeper exist for the same
+  // phone. This helper handles both cases:
+  //   • Keeper exists → delete the orphan (it's redundant; the upsert that
+  //     follows will update the keeper row instead).
+  //   • No keeper → re-stamp the orphan with the current sessionId so the
+  //     upsert below hits it via the unique index instead of creating a
+  //     second row.
+  private async reattachOrphan(
+    tenantId: string,
+    sessionId: string,
+    phoneNumber: string,
+  ): Promise<void> {
+    const keeperExists = await this.prisma.conversation.findFirst({
+      where: { tenantId, sessionId, phoneNumber },
+      select: { id: true },
+    });
+
+    if (keeperExists) {
+      // A live row already exists — orphan is redundant, delete it.
+      await this.prisma.conversation.deleteMany({
+        where: { tenantId, phoneNumber, sessionId: null },
+      });
+    } else {
+      // No live row — safe to re-stamp the orphan.
+      await this.prisma.conversation.updateMany({
+        where: { tenantId, phoneNumber, sessionId: null },
+        data: { sessionId },
+      });
+    }
+  }
+
+  // ── Chat list sync: bulk-upsert conversations from chats.set payload ─────
+  private async handleSessionChatsSynced(data: any): Promise<void> {
+    const { sessionId, chats } = data;
+
+    if (!Array.isArray(chats) || chats.length === 0) {
+      this.logger.warn(
+        `session.chats_synced — no chats in payload for ${sessionId}`,
+      );
+      return;
+    }
+
+    const session = await this.prisma.session.findFirst({
+      where: { openwaId: sessionId },
+      select: { id: true, tenantId: true },
+    });
+
+    if (!session) {
+      this.logger.warn(
+        `session.chats_synced — session not found: ${sessionId}`,
+      );
+      return;
+    }
+
+    const BATCH_SIZE = 20;
+    const BATCH_GAP_MS = 100;
+    let upsertedCount = 0;
+
+    this.logger.log(
+      `session.chats_synced — processing ${chats.length} chats for session ${sessionId} in batches of ${BATCH_SIZE}`,
+    );
+
+    for (let i = 0; i < chats.length; i += BATCH_SIZE) {
+      const batch = chats.slice(i, i + BATCH_SIZE);
+
+      await Promise.all(
+        batch.map(async (chat: any) => {
+          try {
+            const jid: string = chat.jid ?? '';
+            if (!jid) return;
+
+            if (jid.endsWith('@newsletter') || jid.endsWith('@broadcast'))
+              return;
+
+            const lastMessageAt = chat.lastMessageAt
+              ? new Date(chat.lastMessageAt)
+              : new Date();
+
+            const lastMessageText: string =
+              typeof chat.lastMessageText === 'string'
+                ? chat.lastMessageText.slice(0, 500)
+                : '';
+
+            const unreadCount: number =
+              typeof chat.unreadCount === 'number' && chat.unreadCount >= 0
+                ? chat.unreadCount
+                : 0;
+
+            const contactName: string | null =
+              typeof chat.contactName === 'string' && chat.contactName.trim()
+                ? chat.contactName.trim()
+                : null;
+
+            await this.reattachOrphan(session.tenantId, session.id, jid);
+
+            await this.prisma.conversation.upsert({
+              where: {
+                tenantId_sessionId_phoneNumber: {
+                  tenantId: session.tenantId,
+                  sessionId: session.id,
+                  phoneNumber: jid,
+                },
+              },
+              create: {
+                tenantId: session.tenantId,
+                sessionId: session.id,
+                phoneNumber: jid,
+                contactId: null,
+                contactName,
+                status: 'OPEN',
+                unreadCount,
+                lastMessageAt,
+                lastMessageText,
+              },
+              update: {
+                lastMessageAt,
+                lastMessageText,
+                unreadCount,
+                ...(contactName ? { contactName } : {}),
+              },
+            });
+
+            upsertedCount++;
+          } catch (err) {
+            this.logger.error(
+              `session.chats_synced — failed to upsert chat ${chat?.jid ?? '(unknown)'}: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            );
+          }
+        }),
+      );
+
+      if (i + BATCH_SIZE < chats.length) {
+        await new Promise((resolve) => setTimeout(resolve, BATCH_GAP_MS));
+      }
+    }
+
+    this.gatewayService.emitSessionSyncComplete(session.tenantId, {
+      sessionId,
+      conversationCount: upsertedCount,
+    });
+
+    this.logger.log(
+      `session.chats_synced — done: ${upsertedCount}/${chats.length} conversations upserted for session ${sessionId}`,
+    );
+  }
+
   private resolveContactMatchPhone(payload: any, jid: string): string | null {
     const candidate: string | undefined = payload.pn ?? undefined;
     const raw = candidate ?? (jid.endsWith('@lid') ? null : jid);
@@ -133,6 +298,25 @@ export class WebhooksProcessor extends WorkerHost {
 
   private async handleMessageReceived(data: any): Promise<void> {
     try {
+      const payload = data.payload ?? {};
+
+      // ── Dedup by externalId ──────────────────────────────────────────────
+      const incomingExternalId: string | undefined =
+        payload.externalId ?? payload.id ?? undefined;
+
+      if (incomingExternalId) {
+        const existing = await this.prisma.message.findFirst({
+          where: { externalId: incomingExternalId },
+          select: { id: true },
+        });
+        if (existing) {
+          this.logger.debug(
+            `message.received — skipping duplicate, externalId: ${incomingExternalId}`,
+          );
+          return;
+        }
+      }
+
       const session = await this.prisma.session.findFirst({
         where: { openwaId: data.sessionId },
         select: { id: true, tenantId: true },
@@ -145,19 +329,16 @@ export class WebhooksProcessor extends WorkerHost {
         return;
       }
 
-      const payload = data.payload ?? {};
       const fromNumber: string = payload.from ?? data.from ?? '';
 
-      // Skip WhatsApp Channel/Newsletter broadcasts — not a real contact conversation
       if (fromNumber.endsWith('@newsletter')) {
         this.logger.debug(
           `message.received — skipping newsletter broadcast from ${fromNumber}`,
         );
         return;
       }
-      const rawType: string = payload.type?.toUpperCase() ?? 'TEXT';
 
-      // ── Normalise message type to only accepted enum values ──
+      const rawType: string = payload.type?.toUpperCase() ?? 'TEXT';
       const ALLOWED_TYPES = [
         'TEXT',
         'IMAGE',
@@ -182,7 +363,6 @@ export class WebhooksProcessor extends WorkerHost {
 
       const now = new Date(data.timestamp ?? Date.now());
 
-      // ── Contact matching: PN, not JID — see resolveContactMatchPhone above ──
       const matchPhone = this.resolveContactMatchPhone(payload, fromNumber);
 
       const contact = matchPhone
@@ -193,9 +373,31 @@ export class WebhooksProcessor extends WorkerHost {
                 phoneNumber: matchPhone,
               },
             },
-            select: { id: true },
+            select: { id: true, whatsappName: true },
           })
         : null;
+
+      const incomingPushName: string | undefined =
+        typeof payload.pushName === 'string' && payload.pushName.trim()
+          ? payload.pushName.trim()
+          : undefined;
+
+      if (
+        contact &&
+        incomingPushName &&
+        incomingPushName !== contact.whatsappName
+      ) {
+        await this.prisma.contact.update({
+          where: { id: contact.id },
+          data: { whatsappName: incomingPushName },
+        });
+        this.logger.debug(
+          `whatsappName updated for contact ${contact.id}: "${contact.whatsappName ?? 'null'}" → "${incomingPushName}"`,
+        );
+      }
+
+      // ── Re-attach orphaned null-session conversations ──────────────────────
+      await this.reattachOrphan(session.tenantId, session.id, fromNumber);
 
       const conversation = await this.prisma.conversation.upsert({
         where: {
@@ -210,6 +412,7 @@ export class WebhooksProcessor extends WorkerHost {
           sessionId: session.id,
           phoneNumber: fromNumber,
           contactId: contact?.id ?? null,
+          contactName: incomingPushName ?? null,
           status: 'OPEN',
           unreadCount: 1,
           lastMessageAt: now,
@@ -220,6 +423,7 @@ export class WebhooksProcessor extends WorkerHost {
           lastMessageAt: now,
           lastMessageText: messageBody.slice(0, 500),
           ...(contact?.id ? { contactId: contact.id } : {}),
+          ...(incomingPushName ? { contactName: incomingPushName } : {}),
           status: 'OPEN',
         },
       });
@@ -237,7 +441,7 @@ export class WebhooksProcessor extends WorkerHost {
           mediaType,
           direction: 'INBOUND',
           status: 'DELIVERED',
-          externalId: payload.externalId ?? payload.id ?? null,
+          externalId: incomingExternalId ?? null,
         },
       });
 
@@ -261,7 +465,7 @@ export class WebhooksProcessor extends WorkerHost {
         `handleMessageReceived failed: ${error instanceof Error ? error.message : String(error)}`,
         error instanceof Error ? error.stack : undefined,
       );
-      throw error; // rethrow so BullMQ marks job as failed
+      throw error;
     }
   }
 
@@ -271,7 +475,6 @@ export class WebhooksProcessor extends WorkerHost {
       const externalId: string | undefined =
         payload.id?._serialized ?? payload.id;
 
-      // Dedupe — if this message was already created via dashboard send, skip
       if (externalId) {
         const existing = await this.prisma.message.findFirst({
           where: { externalId },
@@ -319,8 +522,6 @@ export class WebhooksProcessor extends WorkerHost {
 
       const now = new Date(data.timestamp ?? Date.now());
 
-      // Same PN-vs-JID matching as handleMessageReceived — see
-      // resolveContactMatchPhone for the full explanation.
       const matchPhone = this.resolveContactMatchPhone(payload, toNumber);
 
       const contact = matchPhone
@@ -334,6 +535,9 @@ export class WebhooksProcessor extends WorkerHost {
             select: { id: true },
           })
         : null;
+
+      // ── Re-attach orphaned null-session conversations (outgoing path) ──────
+      await this.reattachOrphan(session.tenantId, session.id, toNumber);
 
       const conversation = await this.prisma.conversation.upsert({
         where: {
@@ -402,10 +606,6 @@ export class WebhooksProcessor extends WorkerHost {
     }
   }
 
-  /**
-   * Extracts body/mediaUrl/mediaType from a wa-automate message payload.
-   * Handles both TEXT and media (base64) message types.
-   */
   private extractMessageContent(
     payload: any,
     messageType: string,
@@ -474,12 +674,6 @@ export class WebhooksProcessor extends WorkerHost {
     const ack = ackMap.get(data.payload?.ack);
     if (!ack || !data.payload?.externalId) return;
 
-    // ── Race condition guard ──────────────────────────────────────────────
-    // Baileys can emit the ack event before MessagesService.sendMessage()
-    // has finished writing externalId onto the Message row (that write only
-    // happens after the engine's HTTP response returns). If this job runs
-    // first, updateMany matches 0 rows and the ack is silently lost forever.
-    // Retry briefly with backoff before giving up.
     const RETRY_DELAYS_MS = [150, 300, 600, 1000];
     let updateResult = await this.prisma.message.updateMany({
       where: { externalId: data.payload.externalId },
@@ -508,7 +702,6 @@ export class WebhooksProcessor extends WorkerHost {
       return;
     }
 
-    // ── Emit WebSocket event so frontend updates tick in real time ──
     const message = await this.prisma.message.findFirst({
       where: { externalId: data.payload.externalId },
       select: { id: true, tenantId: true, campaignId: true },
@@ -531,12 +724,6 @@ export class WebhooksProcessor extends WorkerHost {
         },
       });
 
-      // Counts are derived fresh from CampaignContact.status here, not from
-      // an incremented Campaign counter column. The old version incremented
-      // a counter on every ack (e.g. sentCount++ on ack=1), but the campaign
-      // processor was ALSO incrementing sentCount synchronously right after
-      // the send HTTP call returned — so every successful send counted
-      // twice, guaranteed, not just on retried/duplicate webhooks.
       const campaign = await this.prisma.campaign.findUnique({
         where: { id: message.campaignId },
         select: { id: true, tenantId: true, totalContacts: true, status: true },

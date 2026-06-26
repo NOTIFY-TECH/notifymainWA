@@ -2,10 +2,11 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useUIStore } from '@/store/uiStore';
 import { useAuthStore } from '@/store/authStore';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import SupportModal from '@/components/support/SupportModal';
 import {
   LayoutDashboard,
   Smartphone,
@@ -13,13 +14,13 @@ import {
   Megaphone,
   Users,
   BarChart2,
-  UserCheck,
   CreditCard,
   Settings,
   ChevronLeft,
   ChevronRight,
   Zap,
   X,
+  LifeBuoy,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -45,7 +46,6 @@ const NAV_SECTIONS = [
     label: 'Account',
     items: [
       { label: 'Analytics', href: '/dashboard/analytics', icon: BarChart2 },
-      { label: 'Team', href: '/dashboard/settings/team', icon: UserCheck },
       { label: 'Billing', href: '/dashboard/billing', icon: CreditCard },
       { label: 'Settings', href: '/dashboard/settings', icon: Settings },
     ],
@@ -65,6 +65,7 @@ export default function Sidebar() {
   const { sidebarOpen, toggleSidebar, setSidebarOpen } = useUIStore();
   const { user } = useAuthStore();
   const sidebarRef = useRef<HTMLElement>(null);
+  const [supportOpen, setSupportOpen] = useState(false);
 
   useEffect(() => {
     if (window.innerWidth < 768) setSidebarOpen(false);
@@ -94,7 +95,42 @@ export default function Sidebar() {
     };
   }, [sidebarOpen]);
 
+  // 'Settings' (/dashboard/settings) intentionally matches via startsWith,
+  // same as every other entry — this is what makes it stay highlighted
+  // when the user is on /dashboard/settings/team too, since that's now a
+  // tab inside Settings rather than a separate sidebar destination.
   const isActive = (href: string) => (href === '/dashboard' ? pathname === '/dashboard' : pathname.startsWith(href));
+
+  // ── Help & Support button (shared across mobile / icon / expanded states) ──
+
+  const helpButtonFull = (
+    <button
+      onClick={() => setSupportOpen(true)}
+      className={cn(
+        'group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors duration-150',
+        'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--sidebar-accent))]',
+      )}
+    >
+      <LifeBuoy
+        size={17}
+        className="shrink-0 text-[hsl(var(--muted-foreground))] group-hover:text-[hsl(var(--foreground))] transition-colors duration-150"
+      />
+      <span className="truncate">Help &amp; Support</span>
+    </button>
+  );
+
+  const helpButtonIcon = (
+    <button
+      onClick={() => setSupportOpen(true)}
+      className={cn(
+        'flex h-10 w-10 mx-auto items-center justify-center rounded-lg transition-colors duration-150',
+        'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--sidebar-accent))]',
+      )}
+      aria-label="Help & Support"
+    >
+      <LifeBuoy size={17} className="shrink-0" />
+    </button>
+  );
 
   return (
     <>
@@ -269,6 +305,35 @@ export default function Sidebar() {
           </div>
         </nav>
 
+        {/* ── Help & Support ── */}
+        <div className="shrink-0 px-2 pb-1">
+          {/* Mobile */}
+          <span className="md:hidden">{helpButtonFull}</span>
+
+          {/* Tablet: icon + tooltip */}
+          <span className="hidden md:block lg:hidden">
+            <Tooltip>
+              <TooltipTrigger render={helpButtonIcon} />
+              <TooltipContent side="right" sideOffset={12} className="text-xs font-medium">
+                Help &amp; Support
+              </TooltipContent>
+            </Tooltip>
+          </span>
+
+          {/* Desktop expanded */}
+          <span className={cn('hidden', sidebarOpen && 'lg:block')}>{helpButtonFull}</span>
+
+          {/* Desktop collapsed: icon + tooltip */}
+          <span className={cn('hidden lg:block', sidebarOpen && 'lg:hidden')}>
+            <Tooltip>
+              <TooltipTrigger render={helpButtonIcon} />
+              <TooltipContent side="right" sideOffset={12} className="text-xs font-medium">
+                Help &amp; Support
+              </TooltipContent>
+            </Tooltip>
+          </span>
+        </div>
+
         {/* ── User info ── */}
         {user && (
           <div className="shrink-0 border-t border-[hsl(var(--sidebar-border))] p-3">
@@ -302,6 +367,9 @@ export default function Sidebar() {
           </div>
         )}
       </aside>
+
+      {/* ── Support Modal ── */}
+      <SupportModal open={supportOpen} onClose={() => setSupportOpen(false)} />
     </>
   );
 }

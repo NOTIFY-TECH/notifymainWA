@@ -14,18 +14,15 @@ interface ContactInfoFormProps {
   onSaved: () => void;
 }
 
-// Builds the editable form state from a contact. Pulled out so it can be
-// used both as the lazy useState initializer and is implicitly re-run on
-// every mount, since the parent page remounts this component via
-// key={contact.id} whenever the contact identity changes. That remount is
-// what keeps the form in sync — no useEffect needed (the previous
-// useEffect-based sync triggered React's set-state-in-effect warning and
-// caused an extra render on every contact load).
 function buildForm(contact: ContactDetail) {
+  // If the stored phoneNumber is a raw JID (contains '@'), treat the phone
+  // field as empty so the user can enter a real number. The JID stays on
+  // the Conversation.phoneNumber — we don't overwrite that here.
+  const isJid = contact.phoneNumber?.includes('@');
   return {
     name: contact.name ?? '',
     email: contact.email ?? '',
-    phoneNumber: contact.phoneNumber ?? '',
+    phoneNumber: isJid ? '' : (contact.phoneNumber ?? ''),
     notes: contact.notes ?? '',
     isBlocked: contact.isBlocked,
     isOptedOut: contact.isOptedOut,
@@ -37,6 +34,8 @@ export default function ContactInfoForm({ contact, isEditing, onSaved }: Contact
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState(() => buildForm(contact));
 
+  const isJidPhone = contact.phoneNumber?.includes('@');
+
   const set = (field: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(prev => ({ ...prev, [field]: e.target.value }));
 
@@ -45,12 +44,19 @@ export default function ContactInfoForm({ contact, isEditing, onSaved }: Contact
   const handleSave = async () => {
     setError(null);
     if (!form.name.trim()) return setError('Name is required.');
-    if (!form.phoneNumber.trim()) return setError('Phone number is required.');
+
+    // Phone is only required if the stored one is NOT a JID.
+    // If it IS a JID and user left phone empty, we skip updating phoneNumber
+    // (the JID stays as the conversation address — we just save other fields).
+    if (!isJidPhone && !form.phoneNumber.trim()) return setError('Phone number is required.');
+
     try {
       await mutateAsync({
         name: form.name.trim(),
         email: form.email.trim() || undefined,
-        phoneNumber: form.phoneNumber.trim(),
+        // Only send phoneNumber if it's non-empty (avoids sending '' which
+        // would fail backend validation, or replacing a JID with nothing).
+        ...(form.phoneNumber.trim() ? { phoneNumber: form.phoneNumber.trim() } : {}),
         notes: form.notes.trim() || undefined,
         isBlocked: form.isBlocked,
         isOptedOut: form.isOptedOut,
@@ -66,12 +72,26 @@ export default function ContactInfoForm({ contact, isEditing, onSaved }: Contact
   };
 
   if (!isEditing) {
-    // Read-only view
     return (
       <div className="p-6 flex flex-col gap-4">
         <Row label="Name" value={contact.name} />
         <Row label="Email" value={contact.email ?? '—'} />
-        <Row label="Phone" value={contact.phoneNumber} />
+        {/* Phone — show a friendly label for JID-only contacts */}
+        {isJidPhone ? (
+          <div>
+            <p className="text-[11px] font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wide mb-0.5">
+              Phone
+            </p>
+            <p className="text-sm text-[hsl(var(--muted-foreground))] italic">
+              No phone number — WhatsApp privacy ID only
+            </p>
+            <p className="text-[11px] text-[hsl(var(--muted-foreground))] mt-0.5">
+              Click Edit to add a real phone number
+            </p>
+          </div>
+        ) : (
+          <Row label="Phone" value={contact.phoneNumber} />
+        )}
         <Row label="Notes" value={contact.notes ?? '—'} multiline />
         <div className="flex gap-4">
           <Row label="Blocked" value={contact.isBlocked ? 'Yes' : 'No'} />
@@ -92,9 +112,18 @@ export default function ContactInfoForm({ contact, isEditing, onSaved }: Contact
 
       <div className="space-y-1.5">
         <Label className="text-xs font-medium text-[hsl(var(--muted-foreground))]">
-          Phone <span className="text-red-400">*</span>
+          Phone {!isJidPhone && <span className="text-red-400">*</span>}
         </Label>
-        <Input value={form.phoneNumber} onChange={set('phoneNumber')} placeholder="e.g. 91XXXXXXXXXX" />
+        <Input
+          value={form.phoneNumber}
+          onChange={set('phoneNumber')}
+          placeholder={isJidPhone ? 'Add real phone number (e.g. 919876543210)' : 'e.g. 91XXXXXXXXXX'}
+        />
+        {isJidPhone && (
+          <p className="text-[11px] text-[hsl(var(--muted-foreground))]">
+            This contact was saved from a WhatsApp privacy ID. Adding a phone number lets you include them in campaigns.
+          </p>
+        )}
       </div>
 
       <div className="space-y-1.5">
@@ -113,7 +142,6 @@ export default function ContactInfoForm({ contact, isEditing, onSaved }: Contact
         />
       </div>
 
-      {/* Toggles */}
       <div className="flex gap-6">
         <Toggle
           label="Blocked"
@@ -181,14 +209,10 @@ function Toggle({
       <div className="relative mt-0.5">
         <input type="checkbox" className="sr-only" checked={checked} onChange={onChange} />
         <div
-          className={`w-9 h-5 rounded-full transition-colors ${
-            checked ? 'bg-[hsl(var(--green))]' : 'bg-[hsl(var(--muted))] border border-[hsl(var(--border))]'
-          }`}
+          className={`w-9 h-5 rounded-full transition-colors ${checked ? 'bg-[hsl(var(--green))]' : 'bg-[hsl(var(--muted))] border border-[hsl(var(--border))]'}`}
         />
         <div
-          className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
-            checked ? 'translate-x-4' : 'translate-x-0'
-          }`}
+          className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-4' : 'translate-x-0'}`}
         />
       </div>
       <div>

@@ -58,6 +58,12 @@ const VARIANT_STYLES: Record<StatusVariant, { pill: string; dot: string }> = {
   },
 };
 
+// Fallback for unknown/undefined status values
+const FALLBACK_STYLES = {
+  pill: 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] border-[hsl(var(--border))]',
+  dot: 'bg-[hsl(var(--muted-foreground))]',
+};
+
 // Statuses that get an animated pulse dot by default
 const PULSE_STATUSES: StatusVariant[] = ['running', 'active'];
 
@@ -78,9 +84,10 @@ const DEFAULT_LABELS: Record<StatusVariant, string> = {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function StatusBadge({ status, label, dot, className }: StatusBadgeProps) {
-  const styles = VARIANT_STYLES[status];
+  // Guard against unknown/undefined status values — falls back to neutral style
+  const styles = VARIANT_STYLES[status] ?? FALLBACK_STYLES;
   const showDot = dot ?? PULSE_STATUSES.includes(status);
-  const displayLabel = label ?? DEFAULT_LABELS[status];
+  const displayLabel = label ?? DEFAULT_LABELS[status] ?? String(status ?? '');
 
   return (
     <span

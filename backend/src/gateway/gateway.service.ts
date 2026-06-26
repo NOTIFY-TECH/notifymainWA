@@ -52,4 +52,22 @@ export class GatewayService {
     if (!this.server) return;
     this.server.to(`tenant:${tenantId}`).emit('campaign:progress', payload);
   }
+
+  // ── Chat sync lifecycle events ────────────────────────────────────────────
+  // Emitted when a WhatsApp session connects and begins syncing the chat list
+  // from the phone. The frontend uses these to show/hide a "Syncing…" banner
+  // so users know their inbox is being populated and don't think it's broken.
+
+  emitSessionSyncing(tenantId: string, payload: { sessionId: string }) {
+    if (!this.server) return;
+    this.server.to(`tenant:${tenantId}`).emit('session:syncing', payload);
+  }
+
+  emitSessionSyncComplete(
+    tenantId: string,
+    payload: { sessionId: string; conversationCount: number },
+  ) {
+    if (!this.server) return;
+    this.server.to(`tenant:${tenantId}`).emit('session:sync_complete', payload);
+  }
 }

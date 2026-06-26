@@ -14,15 +14,20 @@ export const conversationKeys = {
 };
 
 // ─── useConversations ─────────────────────────────────────────────────────────
+// Uses reactive store subscription so tenantId is always current and the
+// query re-enables automatically after auth rehydration.
 
 export function useConversations(filters?: { status?: string; sessionId?: string; search?: string }) {
-  const tenantId = useAuthStore.getState().tenant?.id ?? '';
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
+  const rehydrated = useAuthStore(s => s.rehydrated);
 
   return useQuery({
     queryKey: conversationKeys.list(tenantId, filters),
     queryFn: () => messagesApi.getConversations(tenantId, { ...filters, limit: 50 }),
-    enabled: !!tenantId,
+    enabled: !!tenantId && rehydrated,
     refetchInterval: 30_000,
+    // Refetch when the tab regains focus so the list re-syncs on reopen
+    refetchOnWindowFocus: true,
     select: data => data.data,
   });
 }
@@ -30,20 +35,22 @@ export function useConversations(filters?: { status?: string; sessionId?: string
 // ─── useConversation ──────────────────────────────────────────────────────────
 
 export function useConversation(conversationId: string | null) {
-  const tenantId = useAuthStore.getState().tenant?.id ?? '';
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
+  const rehydrated = useAuthStore(s => s.rehydrated);
 
   return useQuery({
     queryKey: conversationKeys.detail(tenantId, conversationId ?? ''),
     queryFn: () => messagesApi.getConversation(tenantId, conversationId!),
-    enabled: !!tenantId && !!conversationId,
+    enabled: !!tenantId && !!conversationId && rehydrated,
     select: data => data.data,
   });
 }
 
-// ─── useMessages ──────────────────────────────────────────────────────────
+// ─── useMessages ──────────────────────────────────────────────────────────────
 
 export function useMessages(conversationId: string | null) {
-  const tenantId = useAuthStore.getState().tenant?.id ?? '';
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
+  const rehydrated = useAuthStore(s => s.rehydrated);
 
   const query = useInfiniteQuery<
     CursorPaginatedResponse<Message>,
@@ -62,7 +69,7 @@ export function useMessages(conversationId: string | null) {
     initialPageParam: undefined,
     getPreviousPageParam: first => first.meta?.nextCursor ?? undefined,
     getNextPageParam: () => undefined,
-    enabled: !!tenantId && !!conversationId,
+    enabled: !!tenantId && !!conversationId && rehydrated,
   });
 
   const messages =
@@ -83,7 +90,7 @@ export function useMessages(conversationId: string | null) {
 // ─── useMarkAsRead ────────────────────────────────────────────────────────────
 
 export function useMarkAsRead() {
-  const tenantId = useAuthStore.getState().tenant?.id ?? '';
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -100,7 +107,7 @@ export function useMarkAsRead() {
 // ─── useSendMessage ───────────────────────────────────────────────────────────
 
 export function useSendMessage(conversationId: string) {
-  const tenantId = useAuthStore.getState().tenant?.id ?? '';
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -110,7 +117,6 @@ export function useSendMessage(conversationId: string) {
         conversationKeys.messages(tenantId, conversationId),
         (old: InfiniteData<CursorPaginatedResponse<Message>> | undefined) => {
           if (!old) return old;
-          // Append to the LAST page (newest page)
           const lastPage = old.pages[old.pages.length - 1];
           return {
             ...old,
@@ -119,7 +125,6 @@ export function useSendMessage(conversationId: string) {
         },
       );
 
-      // Also bump lastMessageAt + lastMessageText in the conversation list
       queryClient.setQueriesData<Conversation[]>({ queryKey: conversationKeys.all(tenantId) }, old => {
         if (!old) return old;
         return old.map(c =>

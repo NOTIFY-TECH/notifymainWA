@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '@/store/authStore';
 import { analyticsApi } from '@/services/analytics-api';
+import { campaignsApi } from '@/services/campaigns-api';
 import { AnalyticsPeriod } from '@/types/analytics';
 import {
   MessageSquare,
@@ -15,6 +16,8 @@ import {
   Minus,
   RefreshCw,
   ArrowRight,
+  PlayCircle,
+  Clock,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -27,7 +30,6 @@ import {
   PieChart,
   Pie,
   Cell,
-  Legend,
 } from 'recharts';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
@@ -54,6 +56,17 @@ const PIE_COLORS = {
   read: 'hsl(263 70% 56%)',
   failed: 'hsl(0 84% 60%)',
   pending: 'hsl(215 16% 47%)',
+};
+
+// ─── Campaign status badge styles ─────────────────────────────────────────────
+
+const CAMPAIGN_STATUS_STYLES: Record<string, string> = {
+  RUNNING: 'bg-[hsl(var(--green-dim))] text-[hsl(var(--green))]',
+  SCHEDULED: 'bg-[hsl(var(--purple-dim))] text-[hsl(var(--purple))]',
+  COMPLETED: 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]',
+  FAILED: 'bg-red-500/10 text-red-400',
+  CANCELLED: 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]',
+  DRAFT: 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]',
 };
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -173,9 +186,33 @@ export default function DashboardPage() {
     enabled: !!tenantId,
   });
 
+  // ── Scheduled campaigns ─────────────────────────────────────────────────────
+  const { data: scheduledData, isLoading: scheduledLoading } = useQuery({
+    queryKey: ['campaigns', 'scheduled', tenantId],
+    queryFn: () => campaignsApi.list(tenantId, { status: 'SCHEDULED', limit: 5 }),
+    enabled: !!tenantId,
+    refetchInterval: 30_000,
+  });
+
+  // ── Most recent campaigns (any status) — used to fill out the panel ───────
+  const { data: recentData, isLoading: recentLoading } = useQuery({
+    queryKey: ['campaigns', 'recent', tenantId],
+    queryFn: () => campaignsApi.list(tenantId, { limit: 5 }),
+    enabled: !!tenantId,
+    refetchInterval: 30_000,
+  });
+
   const overview = overviewData?.data;
   const timeSeries = timeSeriesData?.data ?? [];
   const delivery = deliveryData?.data;
+
+  const scheduledCampaigns = scheduledData?.data ?? [];
+  const recentCampaigns = recentData?.data ?? [];
+  const campaignsLoading = scheduledLoading || recentLoading;
+
+  const scheduledIds = new Set(scheduledCampaigns.map(c => c.id));
+  const fillerCampaigns = recentCampaigns.filter(c => !scheduledIds.has(c.id));
+  const displayedCampaigns = [...scheduledCampaigns, ...fillerCampaigns].slice(0, 5);
 
   const chartData = timeSeries.map(point => ({
     ...point,
@@ -209,7 +246,6 @@ export default function DashboardPage() {
             Good {getTimeOfDay()}, <span className="gradient-text">{user?.firstName ?? 'there'}</span>
           </h1>
         </div>
-
         <div className="flex items-center gap-2">
           <div className="flex rounded-[var(--radius)] border border-[hsl(var(--border))] overflow-hidden">
             {PERIODS.map(p => (
@@ -370,7 +406,7 @@ export default function DashboardPage() {
 
         {/* Delivery pie */}
         <div className="rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6">
-          <h2 className="text-sm font-semibold text-[hsl(var(--foreground))] mb-6">Delivery Breakdown</h2>
+          <h2 className="text-sm font-semibold text-[hsl(var(--foreground))] mb-4">Delivery Breakdown</h2>
           {deliveryLoading ? (
             <ChartSkeleton />
           ) : pieData.length === 0 ? (
@@ -378,41 +414,66 @@ export default function DashboardPage() {
               No data for this period
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height={240}>
-              <PieChart>
-                <Pie
-                  data={pieData}
-                  cx="50%"
-                  cy="45%"
-                  innerRadius={55}
-                  outerRadius={82}
-                  paddingAngle={3}
-                  dataKey="value"
-                >
-                  {pieData.map(entry => (
-                    <Cell key={entry.key} fill={PIE_COLORS[entry.key as keyof typeof PIE_COLORS]} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  formatter={value => [Number(value).toLocaleString(), '']}
-                  contentStyle={{
-                    background: 'hsl(215 28% 11%)',
-                    border: '1px solid hsl(215 28% 16%)',
-                    borderRadius: '0.75rem',
-                    fontSize: '12px',
-                  }}
-                />
-                <Legend iconType="circle" iconSize={7} wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
-              </PieChart>
-            </ResponsiveContainer>
+            <>
+              <ResponsiveContainer width="100%" height={180}>
+                <PieChart>
+                  <Pie
+                    data={pieData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={50}
+                    outerRadius={75}
+                    paddingAngle={3}
+                    dataKey="value"
+                  >
+                    {pieData.map(entry => (
+                      <Cell key={entry.key} fill={PIE_COLORS[entry.key as keyof typeof PIE_COLORS]} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    formatter={value => [Number(value).toLocaleString(), '']}
+                    contentStyle={{
+                      background: 'hsl(215 28% 11%)',
+                      border: '1px solid hsl(215 28% 16%)',
+                      borderRadius: '0.75rem',
+                      fontSize: '12px',
+                    }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              {/* Manual legend — number + percentage per row, matching analytics page */}
+              <div className="mt-2 space-y-2">
+                {pieData.map(entry => {
+                  const total = pieData.reduce((s, d) => s + d.value, 0);
+                  const pct = total > 0 ? Math.round((entry.value / total) * 100) : 0;
+                  return (
+                    <div key={entry.key} className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="h-2 w-2 rounded-full shrink-0"
+                          style={{ background: PIE_COLORS[entry.key as keyof typeof PIE_COLORS] }}
+                        />
+                        <span className="text-[hsl(var(--muted-foreground))]">{entry.name}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-[hsl(var(--foreground))]">
+                          {entry.value.toLocaleString()}
+                        </span>
+                        <span className="text-[hsl(var(--muted-foreground))] w-8 text-right">{pct}%</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
           )}
         </div>
       </div>
 
-      {/* ── Active Campaigns placeholder ── */}
+      {/* ── Scheduled + Recent Campaigns ── */}
       <div className="rounded-[var(--radius)] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6">
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-sm font-semibold text-[hsl(var(--foreground))]">Active Campaigns</h2>
+          <h2 className="text-sm font-semibold text-[hsl(var(--foreground))]">Campaigns</h2>
           <Link
             href="/dashboard/campaigns"
             className="flex items-center gap-1 text-xs text-[hsl(var(--green))] hover:underline"
@@ -420,18 +481,89 @@ export default function DashboardPage() {
             View all <ArrowRight size={11} />
           </Link>
         </div>
-        <div className="flex flex-col items-center justify-center py-10 text-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[hsl(var(--muted))]">
-            <Megaphone size={18} className="text-[hsl(var(--muted-foreground))]" />
+
+        {campaignsLoading ? (
+          <div className="space-y-3">
+            {[...Array(3)].map((_, i) => (
+              <div key={i} className="h-14 w-full animate-pulse rounded-[var(--radius)] bg-[hsl(var(--muted))]" />
+            ))}
           </div>
-          <div>
-            <p className="text-sm font-medium text-[hsl(var(--foreground))]">No active campaigns</p>
-            <p className="text-xs text-[hsl(var(--muted-foreground))] mt-0.5">Running campaigns will appear here</p>
+        ) : displayedCampaigns.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-10 text-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[hsl(var(--muted))]">
+              <Megaphone size={18} className="text-[hsl(var(--muted-foreground))]" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-[hsl(var(--foreground))]">No campaigns yet</p>
+              <p className="text-xs text-[hsl(var(--muted-foreground))] mt-0.5">
+                Scheduled and recent campaigns will appear here
+              </p>
+            </div>
+            <Link href="/dashboard/campaigns" className="btn-outline-green px-4 py-2 text-xs mt-1">
+              Create campaign
+            </Link>
           </div>
-          <Link href="/dashboard/campaigns" className="btn-outline-green px-4 py-2 text-xs mt-1">
-            Create campaign
-          </Link>
-        </div>
+        ) : (
+          <div className="divide-y divide-[hsl(var(--border))]">
+            {displayedCampaigns.map(campaign => {
+              const total = campaign.totalContacts ?? 0;
+              const sent = campaign.sentCount ?? 0;
+              const progress = total > 0 ? Math.round((sent / total) * 100) : 0;
+              const isScheduled = campaign.status === 'SCHEDULED';
+
+              return (
+                <Link
+                  key={campaign.id}
+                  href={`/dashboard/campaigns/${campaign.id}`}
+                  className="flex items-center gap-4 py-3 first:pt-0 last:pb-0 hover:opacity-80 transition-opacity"
+                >
+                  <div
+                    className={cn(
+                      'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg',
+                      isScheduled ? 'bg-[hsl(var(--purple-dim))]' : 'bg-[hsl(var(--green-dim))]',
+                    )}
+                  >
+                    {isScheduled ? (
+                      <Clock size={16} className="text-[hsl(var(--purple))]" />
+                    ) : (
+                      <PlayCircle size={16} className="text-[hsl(var(--green))]" />
+                    )}
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <span className="text-xs font-semibold text-[hsl(var(--foreground))] truncate">
+                        {campaign.name}
+                      </span>
+                      <span className="shrink-0 text-[11px] text-[hsl(var(--muted-foreground))]">
+                        {isScheduled && campaign.scheduledAt
+                          ? format(parseISO(campaign.scheduledAt), 'MMM d, HH:mm')
+                          : `${sent.toLocaleString()} / ${total.toLocaleString()}`}
+                      </span>
+                    </div>
+                    {!isScheduled && (
+                      <div className="h-1.5 w-full rounded-full bg-[hsl(var(--muted))] overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-[hsl(var(--green))] transition-all duration-500"
+                          style={{ width: `${progress}%` }}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <span
+                    className={cn(
+                      'shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide',
+                      CAMPAIGN_STATUS_STYLES[campaign.status] ?? CAMPAIGN_STATUS_STYLES['DRAFT'],
+                    )}
+                  >
+                    {campaign.status.toLowerCase()}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

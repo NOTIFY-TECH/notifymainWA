@@ -12,7 +12,7 @@ interface ConversationItemProps {
 }
 
 export default function ConversationItem({ conversation, isActive, onClick }: ConversationItemProps) {
-  const displayName = conversation.contactName || conversation.contact?.name || conversation.phoneNumber;
+  const displayName = conversation.contactName?.trim() || conversation.phoneNumber;
 
   const lastMessage = conversation.lastMessage;
   const lastText = (() => {

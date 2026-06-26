@@ -15,6 +15,7 @@ export interface SendPayload {
   mediaType?: string;
   caption?: string;
   type: string;
+  conversationId?: string;
 }
 
 interface SendMessageFormProps {
@@ -48,7 +49,7 @@ function FileIcon({ mimeType, size = 20 }: { mimeType: string; size?: number }) 
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function SendMessageForm({ tenantId, onSend, isSending }: SendMessageFormProps) {
+export default function SendMessageForm({ tenantId, onSend, isSending, conversationId }: SendMessageFormProps) {
   const { theme } = useTheme();
   const [text, setText] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
@@ -125,7 +126,8 @@ export default function SendMessageForm({ tenantId, onSend, isSending }: SendMes
           type: msgType,
           mediaUrl: uploaded.url,
           mediaType: uploaded.mediaType,
-          caption: trimmed || undefined, // text becomes caption for media
+          caption: trimmed || undefined,
+          conversationId, // text becomes caption for media
         });
 
         setText('');
@@ -140,10 +142,10 @@ export default function SendMessageForm({ tenantId, onSend, isSending }: SendMes
     }
 
     // ── Text message ──
-    onSend({ type: 'text', text: trimmed });
+    onSend({ type: 'text', text: trimmed, conversationId });
     setText('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
-  }, [text, attachment, isSending, isUploading, tenantId, onSend]);
+  }, [text, attachment, isSending, isUploading, tenantId, onSend, conversationId]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {

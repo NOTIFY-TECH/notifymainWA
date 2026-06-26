@@ -42,6 +42,15 @@ export class UpdateCampaignDto {
 
   @ApiPropertyOptional({
     description:
+      'URL to send as a separate plain-text message after the media+caption so ' +
+      'WhatsApp renders it as a link-preview card. Set to null to clear an existing value.',
+  })
+  @IsOptional()
+  @IsString()
+  linkUrl?: string | null;
+
+  @ApiPropertyOptional({
+    description:
       'Set to null to clear an existing schedule and make the campaign send-on-launch',
   })
   @IsOptional()

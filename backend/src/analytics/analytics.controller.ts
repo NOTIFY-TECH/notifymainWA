@@ -62,4 +62,16 @@ export class AnalyticsController {
   ) {
     return this.analyticsService.getCampaignAnalytics(tenantId, campaignId);
   }
+
+  // GET /tenants/:tenantId/analytics/recent-messages?limit=10
+  @Get('recent-messages')
+  getRecentMessages(
+    @Param('tenantId') tenantId: string,
+    @Query('limit') limit?: string,
+  ) {
+    const parsedLimit = limit
+      ? Math.min(Math.max(parseInt(limit, 10) || 10, 1), 50)
+      : 10;
+    return this.analyticsService.getRecentMessages(tenantId, parsedLimit);
+  }
 }

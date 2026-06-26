@@ -84,8 +84,13 @@ export class TeamController {
   revokeInvite(
     @Param('tenantId') tenantId: string,
     @Param('invitationId') invitationId: string,
+    @Req() req: any,
   ) {
-    return this.teamService.revokeInvite(tenantId, invitationId);
+    return this.teamService.revokeInvite(
+      tenantId,
+      invitationId,
+      req.user.userId,
+    );
   }
 
   // PATCH /tenants/:tenantId/team/:userId/role

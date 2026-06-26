@@ -42,24 +42,20 @@ export class AnalyticsService {
   constructor(private readonly prisma: PrismaService) {}
 
   // ── 1. Overview KPIs ────────────────────────────────────────────────────────
-  // Uses Prisma's query builder (.count()), not raw SQL — model→table mapping
-  // is handled automatically here, unaffected by the bug fixed below.
+  // Uses Prisma's query builder (.count()) — timezone-safe, Prisma handles
+  // Date objects correctly regardless of column storage type.
 
   async getOverview(tenantId: string, period: AnalyticsPeriod) {
     const { currStart, currEnd, prevStart, prevEnd } = getPeriodWindows(period);
 
     const [
-      // Current period message count
       currMessages,
       prevMessages,
-      // Contacts created in each period
       currContacts,
       prevContacts,
-      // Running totals (not period-scoped)
       totalContacts,
       activeSessions,
       activeCampaigns,
-      // Delivery rate numerator/denominator in current period
       outboundInPeriod,
       deliveredOrReadInPeriod,
     ] = await Promise.all([
@@ -129,29 +125,37 @@ export class AnalyticsService {
 
   // ── 2. Message timeseries ───────────────────────────────────────────────────
   //
-  // FIXED: raw SQL was querying FROM "Message" (the Prisma model name).
-  // The Message model maps to table "messages" via @@map("messages") in
-  // schema.prisma — Postgres has no relation called "Message", only
-  // "messages". This was throwing `relation "Message" does not exist` on
-  // every call. Fixed by quoting the real table name.
+  // TIMEZONE FIX: createdAt is stored as `timestamp without time zone` in
+  // Postgres. JS Date objects from NestJS are UTC. Without casting, Postgres
+  // compares UTC instants against naive timestamps, shifting the window by the
+  // server's local offset (IST = +5:30), causing the chart to show "No data"
+  // even when rows exist in the period.
+  //
+  // Fix: use CAST(${param} AS timestamptz) — NOT the ${param}::timestamptz
+  // syntax, which does NOT work with Prisma's $queryRaw parameterised
+  // placeholders. Prisma emits $1, $2 positional params; appending ::type
+  // after a placeholder is invalid and the cast is silently lost.
 
   async getMessageTimeSeries(tenantId: string, period: AnalyticsPeriod) {
     const { currStart, currEnd } = getPeriodWindows(period);
-    const truncUnit = period === '24h' ? 'hour' : 'day';
+    // Use Prisma.raw so truncUnit is inlined as literal SQL, not a bind
+    // parameter. When passed as ${truncUnit} inside Prisma.sql, Postgres
+    // receives date_trunc($1, ...) and cannot match the SELECT expression
+    // to the GROUP BY expression, causing error 42803.
+    const truncUnit = Prisma.raw(period === '24h' ? "'hour'" : "'day'");
 
-    // Raw SQL for date_trunc grouping — Prisma groupBy doesn't support date truncation
     const rows = await this.prisma.$queryRaw<
       { date: Date; sent: bigint; delivered: bigint; failed: bigint }[]
     >(Prisma.sql`
       SELECT
         date_trunc(${truncUnit}, "createdAt") AS date,
-        COUNT(*) FILTER (WHERE direction = 'OUTBOUND')                         AS sent,
+        COUNT(*) FILTER (WHERE direction = 'OUTBOUND')                                    AS sent,
         COUNT(*) FILTER (WHERE direction = 'OUTBOUND' AND status IN ('DELIVERED','READ')) AS delivered,
-        COUNT(*) FILTER (WHERE direction = 'OUTBOUND' AND status = 'FAILED')   AS failed
+        COUNT(*) FILTER (WHERE direction = 'OUTBOUND' AND status = 'FAILED')              AS failed
       FROM "messages"
-      WHERE "tenantId" = ${tenantId}
-        AND "createdAt" >= ${currStart}
-        AND "createdAt" <= ${currEnd}
+      WHERE "tenantId" = CAST(${tenantId} AS uuid)
+        AND "createdAt" >= CAST(${currStart} AS timestamptz)
+        AND "createdAt" <= CAST(${currEnd} AS timestamptz)
       GROUP BY date_trunc(${truncUnit}, "createdAt")
       ORDER BY date_trunc(${truncUnit}, "createdAt") ASC
     `);
@@ -167,7 +171,7 @@ export class AnalyticsService {
   }
 
   // ── 3. Delivery rate breakdown ──────────────────────────────────────────────
-  // Uses Prisma's query builder (.groupBy()), not raw SQL — unaffected.
+  // Uses Prisma query builder — timezone-safe.
 
   async getDeliveryRates(tenantId: string, period: AnalyticsPeriod) {
     const { currStart, currEnd } = getPeriodWindows(period);
@@ -198,19 +202,11 @@ export class AnalyticsService {
   }
 
   // ── 4. Agent stats ──────────────────────────────────────────────────────────
-  //
-  // FIXED: this raw query had THREE model-name references, not one —
-  // FROM "User" u, JOIN "Conversation" c, JOIN "Message" m. The boot log only
-  // surfaced the "User" failure (Postgres errors on the first relation it
-  // can't resolve), but Conversation and Message were equally broken and
-  // would have failed next had "User" alone been fixed. All three corrected
-  // to their real @@map'd table names: users, conversations, messages.
+  // TIMEZONE FIX applied — CAST(... AS timestamptz) on date bounds.
 
   async getAgentStats(tenantId: string, period: AnalyticsPeriod) {
     const { currStart, currEnd } = getPeriodWindows(period);
 
-    // Conversations handled = conversations where assignedAgentId is set
-    // and had at least one message in the period
     const rows = await this.prisma.$queryRaw<
       {
         agentId: string;
@@ -235,12 +231,12 @@ export class AnalyticsService {
           )) * 1000
         )                                           AS "avgResponseTimeMs"
       FROM "users" u
-      JOIN "conversations" c ON c."assignedAgentId" = u.id AND c."tenantId" = ${tenantId}
+      JOIN "conversations" c ON c."assignedAgentId" = u.id AND c."tenantId" = CAST(${tenantId} AS uuid)
       JOIN "messages" m      ON m."conversationId" = c.id
                            AND m.direction = 'OUTBOUND'
-                           AND m."createdAt" >= ${currStart}
-                           AND m."createdAt" <= ${currEnd}
-      WHERE u."tenantId" = ${tenantId}
+                           AND m."createdAt" >= CAST(${currStart} AS timestamptz)
+                           AND m."createdAt" <= CAST(${currEnd} AS timestamptz)
+      WHERE u."tenantId" = CAST(${tenantId} AS uuid)
       GROUP BY u.id, u."firstName", u."lastName"
       ORDER BY "messagesReplied" DESC
     `);
@@ -258,17 +254,10 @@ export class AnalyticsService {
     };
   }
 
-  // ── 5. Campaign analytics (timeseries for a single campaign) ───────────────
-  //
-  // FIXED: raw SQL was querying FROM "CampaignContact" (the Prisma model
-  // name). This hadn't thrown yet in the logs we'd seen — nobody had hit
-  // this endpoint recently — but it was built with the exact same bug
-  // pattern as the other two raw queries above and would have failed the
-  // same way (`relation "CampaignContact" does not exist`) the first time it
-  // ran. Fixed to the real @@map'd table name: campaign_contacts.
+  // ── 5. Campaign analytics ───────────────────────────────────────────────────
+  // TIMEZONE FIX applied — CAST(... AS timestamptz) on sentAt bounds.
 
   async getCampaignAnalytics(tenantId: string, campaignId: string) {
-    // Verify ownership
     const campaign = await this.prisma.campaign.findFirst({
       where: { id: campaignId, tenantId },
       select: { id: true, startedAt: true, completedAt: true },
@@ -285,15 +274,15 @@ export class AnalyticsService {
     >(Prisma.sql`
       SELECT
         date_trunc('hour', cc."sentAt") AS date,
-        COUNT(*) FILTER (WHERE cc.status != 'PENDING')                             AS sent,
-        COUNT(*) FILTER (WHERE cc.status IN ('DELIVERED','READ'))                   AS delivered,
-        COUNT(*) FILTER (WHERE cc.status = 'FAILED')                               AS failed
+        COUNT(*) FILTER (WHERE cc.status != 'PENDING')               AS sent,
+        COUNT(*) FILTER (WHERE cc.status IN ('DELIVERED','READ'))     AS delivered,
+        COUNT(*) FILTER (WHERE cc.status = 'FAILED')                 AS failed
       FROM "campaign_contacts" cc
-      WHERE cc."campaignId" = ${campaignId}
-        AND cc."tenantId"   = ${tenantId}
+      WHERE cc."campaignId" = CAST(${campaignId} AS uuid)
+        AND cc."tenantId"   = CAST(${tenantId} AS uuid)
         AND cc."sentAt"     IS NOT NULL
-        AND cc."sentAt"     >= ${start}
-        AND cc."sentAt"     <= ${end}
+        AND cc."sentAt"     >= CAST(${start} AS timestamptz)
+        AND cc."sentAt"     <= CAST(${end} AS timestamptz)
       GROUP BY date_trunc('hour', cc."sentAt")
       ORDER BY date_trunc('hour', cc."sentAt") ASC
     `);
@@ -305,6 +294,63 @@ export class AnalyticsService {
         delivered: Number(r.delivered),
         failed: Number(r.failed),
       })),
+    };
+  }
+
+  // ── 6. Recent messages ──────────────────────────────────────────────────────
+  // Prisma query builder only — timezone-safe, no raw SQL.
+  //
+  // DISPLAY NAME PRIORITY FIX (session 17 parity): contact.name (CRM name set
+  // by tenant) must win over contact.whatsappName (the contact's own WA profile
+  // name — may contain emoji/junk). Previous order was whatsappName first,
+  // which was wrong and inconsistent with conversations.service.ts.
+  // Correct priority: contact.name → contact.whatsappName → contactName → phone digits.
+
+  async getRecentMessages(tenantId: string, limit: number = 10) {
+    const messages = await this.prisma.message.findMany({
+      where: { tenantId },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        body: true,
+        direction: true,
+        status: true,
+        createdAt: true,
+        conversation: {
+          select: {
+            phoneNumber: true,
+            contactName: true,
+            contact: {
+              select: {
+                name: true,
+                whatsappName: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return {
+      data: messages.map((m) => {
+        const conv = m.conversation;
+        const displayName =
+          conv?.contact?.name?.trim() ||
+          conv?.contact?.whatsappName ||
+          conv?.contactName ||
+          conv?.phoneNumber?.split('@')[0] ||
+          'Unknown';
+
+        return {
+          id: m.id,
+          direction: m.direction,
+          body: (m.body ?? '').slice(0, 80),
+          status: m.status,
+          createdAt: m.createdAt.toISOString(),
+          displayName,
+        };
+      }),
     };
   }
 }

@@ -8,6 +8,23 @@ import { GatewayService } from '../gateway/gateway.service';
 import { EngineRegistryService } from '../engine-registry/engine-registry.service';
 import { EngineClientService } from '../engine-registry/engine-client.service';
 import { computeCampaignProgress } from './utils/campaign-progress.util';
+import {
+  resolveDisplayName,
+  interpolateMessage,
+} from '../common/utils/message-interpolation.util';
+
+// ─── URL extraction ────────────────────────────────────────────────────────────
+// Extracts the first URL found in a string. Returns null if none found.
+// Used to detect if a caption already contains a link so we can send it
+// as a separate plain-text message for WhatsApp card rendering.
+
+const URL_REGEX = /https?:\/\/[^\s]+/i;
+
+function extractUrlFromText(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const match = text.match(URL_REGEX);
+  return match ? match[0] : null;
+}
 
 @Processor('campaign-queue')
 export class CampaignProcessor extends WorkerHost {
@@ -62,8 +79,16 @@ export class CampaignProcessor extends WorkerHost {
       });
     }
 
+    // ── Fetch pending contacts WITH their Contact row for {{name}} resolution ──
+    // contact is optional on CampaignContact (contactId is nullable) so the
+    // include may return null — resolveDisplayName handles that gracefully.
     const pendingContacts = await this.prisma.campaignContact.findMany({
       where: { campaignId, status: 'PENDING' },
+      include: {
+        contact: {
+          select: { whatsappName: true, name: true },
+        },
+      },
     });
 
     const apiKey = this.config.get<string>('OPENWA_API_KEY');
@@ -72,9 +97,42 @@ export class CampaignProcessor extends WorkerHost {
       campaign.mediaUrl,
       campaign.mediaType,
     );
+    const isLinkOnly = campaign.mediaType === 'text/link';
     const engineMediaUrl = this.engineClient.toEngineAccessibleUrl(
       campaign.mediaUrl,
     );
+
+    // ── Resolve follow-up link messages ──────────────────────────────────────
+    // After the main media+caption send, we may need to send 1 or 2 additional
+    // plain-text messages so WhatsApp renders them as link-preview cards.
+    //
+    // Priority order (matching the agreed spec):
+    //   1. URL extracted from caption text (if any)
+    //   2. Explicit linkUrl field (if any)
+    //
+    // Both are sent if both are present (up to 3 total messages per contact).
+    // They are only sent when the main message has media — text-only campaigns
+    // with a URL in the body do not trigger the split behaviour.
+    //
+    // Note: captionUrl / followUpUrls are derived from the raw messageTemplate
+    // (before {{name}} substitution) because link URLs should not contain
+    // {{name}} tokens. If they somehow do, interpolation happens per-contact
+    // below on outboundText; the link URL itself is sent verbatim.
+
+    const hasMedia = !!campaign.mediaUrl && !isLinkOnly;
+    const captionUrl = hasMedia
+      ? extractUrlFromText(campaign.messageTemplate)
+      : null;
+    const explicitLinkUrl =
+      hasMedia && campaign.linkUrl ? campaign.linkUrl : null;
+
+    // Deduplicate: if the explicit link is the same URL already in the caption,
+    // only send it once (as the caption-extracted one).
+    const followUpUrls: string[] = [];
+    if (captionUrl) followUpUrls.push(captionUrl);
+    if (explicitLinkUrl && explicitLinkUrl !== captionUrl) {
+      followUpUrls.push(explicitLinkUrl);
+    }
 
     let engine;
     try {
@@ -82,14 +140,32 @@ export class CampaignProcessor extends WorkerHost {
         campaign.sessionId,
       );
     } catch {
-      this.logger.error(
-        `No engine instance for session ${campaign.sessionId}, cancelling campaign ${campaignId}`,
+      const fallbackInstanceId = campaign.session?.engineInstanceId ?? null;
+      if (!fallbackInstanceId) {
+        this.logger.error(
+          `No engine instance for session ${campaign.sessionId} and no DB fallback, cancelling campaign ${campaignId}`,
+        );
+        await this.prisma.campaign.update({
+          where: { id: campaignId },
+          data: { status: 'CANCELLED' },
+        });
+        return;
+      }
+      this.logger.warn(
+        `Redis mapping missing for session ${campaign.sessionId}, falling back to DB instanceId ${fallbackInstanceId}`,
       );
-      await this.prisma.campaign.update({
-        where: { id: campaignId },
-        data: { status: 'CANCELLED' },
-      });
-      return;
+      try {
+        engine = await this.engineRegistry.getInstanceById(fallbackInstanceId);
+      } catch {
+        this.logger.error(
+          `DB fallback engine ${fallbackInstanceId} also not found in Redis, cancelling campaign ${campaignId}`,
+        );
+        await this.prisma.campaign.update({
+          where: { id: campaignId },
+          data: { status: 'CANCELLED' },
+        });
+        return;
+      }
     }
 
     for (const contact of pendingContacts) {
@@ -102,6 +178,23 @@ export class CampaignProcessor extends WorkerHost {
         return;
       }
 
+      // ── Per-contact {{name}} interpolation (17.4) ─────────────────────────
+      // Resolve this recipient's display name then substitute {{name}} in the
+      // message template. Each recipient gets their own personalised copy.
+      // Falls back: whatsappName → CRM name → phone number (never blank).
+      const displayName = resolveDisplayName(
+        contact.contact,
+        contact.phoneNumber,
+      );
+
+      const baseText = isLinkOnly
+        ? `${campaign.messageTemplate}\n\n${campaign.mediaUrl}`
+        : campaign.messageTemplate;
+
+      const outboundText = interpolateMessage(baseText, displayName);
+
+      // ── Main message (media + caption, or plain text) ─────────────────────
+
       const message = await this.prisma.message.create({
         data: {
           tenantId,
@@ -111,7 +204,7 @@ export class CampaignProcessor extends WorkerHost {
           type: messageType as any,
           fromNumber: campaign.session.phoneNumber ?? '',
           toNumber: contact.phoneNumber,
-          body: campaign.messageTemplate,
+          body: outboundText,
           mediaUrl: campaign.mediaUrl,
           status: 'PENDING',
         },
@@ -124,8 +217,8 @@ export class CampaignProcessor extends WorkerHost {
             sessionId: campaign.session.openwaId,
             to: contact.phoneNumber,
             type: messageType.toLowerCase(),
-            text: campaign.messageTemplate,
-            caption: campaign.messageTemplate,
+            text: outboundText,
+            caption: outboundText,
             mediaUrl: engineMediaUrl,
             messageId: message.id,
           },
@@ -146,6 +239,68 @@ export class CampaignProcessor extends WorkerHost {
           where: { id: contact.id },
           data: { status: 'SENT', sentAt: new Date(), messageId: message.id },
         });
+
+        // ── Follow-up link messages ─────────────────────────────────────────
+        // Only sent if the main message succeeded. Each URL is sent as a
+        // separate plain-text message so WhatsApp unfurls it as a card.
+        // These are fire-and-forget — a failure here does NOT flip the
+        // CampaignContact to FAILED (the main send already succeeded).
+
+        for (const linkUrl of followUpUrls) {
+          try {
+            // Small delay between messages to avoid flooding
+            await new Promise((r) => setTimeout(r, 500));
+
+            const linkMessage = await this.prisma.message.create({
+              data: {
+                tenantId,
+                sessionId: campaign.sessionId,
+                campaignId: campaign.id,
+                direction: 'OUTBOUND',
+                type: 'TEXT',
+                fromNumber: campaign.session.phoneNumber ?? '',
+                toNumber: contact.phoneNumber,
+                body: linkUrl,
+                status: 'PENDING',
+              },
+            });
+
+            const linkResponse = await axios.post(
+              `${engine.url}/api/messages/send`,
+              {
+                sessionId: campaign.session.openwaId,
+                to: contact.phoneNumber,
+                type: 'text',
+                text: linkUrl,
+                messageId: linkMessage.id,
+              },
+              { headers: { 'X-API-Key': apiKey } },
+            );
+
+            const linkExternalId =
+              typeof linkResponse.data?.messageId === 'string'
+                ? linkResponse.data.messageId
+                : null;
+
+            await this.prisma.message.update({
+              where: { id: linkMessage.id },
+              data: {
+                status: 'SENT',
+                externalId: linkExternalId,
+                sentAt: new Date(),
+              },
+            });
+
+            this.logger.debug(
+              `Campaign ${campaignId}: sent link card to ${contact.phoneNumber}: ${linkUrl}`,
+            );
+          } catch (linkErr) {
+            // Log but do not fail the contact — main message already went through
+            this.logger.warn(
+              `Campaign ${campaignId}: failed to send link card to ${contact.phoneNumber} (${linkUrl}): ${linkErr instanceof Error ? linkErr.message : String(linkErr)}`,
+            );
+          }
+        }
 
         await this.emitProgress(campaignId, tenantId);
       } catch (err) {
@@ -229,7 +384,8 @@ function resolveMessageType(
   mediaType: string | null,
 ): string {
   if (!mediaUrl) return 'TEXT';
-  if (!mediaType) return 'IMAGE'; // legacy fallback
+  if (mediaType === 'text/link') return 'TEXT';
+  if (!mediaType) return 'IMAGE';
   if (mediaType.startsWith('image/')) return 'IMAGE';
   if (mediaType.startsWith('video/')) return 'VIDEO';
   if (mediaType.startsWith('audio/')) return 'AUDIO';

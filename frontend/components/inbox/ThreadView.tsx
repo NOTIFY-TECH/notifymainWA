@@ -11,18 +11,149 @@ import {
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/store/authStore';
-import { useCreateContactFromConversation } from '@/hooks/useContacts';
 import MessageBubble from './MessageBubble';
 import SendMessageForm from './SendMessageForm';
 import { Message } from '@/types/message';
 import { InfiniteData } from '@tanstack/react-query';
 import { CursorPaginatedResponse } from '@/types/index';
-import { Loader2, ArrowLeft, UserPlus, Check } from 'lucide-react';
+import { Loader2, ArrowLeft, UserPlus, Check, X, Pencil } from 'lucide-react';
+import { contactsApi } from '@/services/contacts-api';
+import { useCreateContactFromConversation, useContact } from '@/hooks/useContacts';
+import ContactInfoForm from '@/components/contacts/ContactInfoForm';
 
 interface ThreadViewProps {
   conversationId: string;
   onBack?: () => void;
 }
+
+// ─── Save as Contact Modal ────────────────────────────────────────────────────
+
+interface SaveContactModalProps {
+  open: boolean;
+  phoneDisplay: string;
+  onSave: (name: string) => void;
+  onClose: () => void;
+  isPending: boolean;
+}
+
+function SaveContactModal({ open, phoneDisplay, onSave, onClose, isPending }: SaveContactModalProps) {
+  const [name, setName] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open) inputRef.current?.focus();
+  }, [open]);
+
+  if (!open) return null;
+
+  const handleSave = () => {
+    if (!name.trim()) return setError('Name is required.');
+    setError(null);
+    onSave(name.trim());
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-sm mx-4 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-xl">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold text-[hsl(var(--foreground))]">Save as contact</h3>
+          <button
+            onClick={onClose}
+            className="p-1 rounded-md hover:bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] transition-colors"
+          >
+            <X size={14} />
+          </button>
+        </div>
+        <div className="mb-3">
+          <p className="text-xs font-medium text-[hsl(var(--muted-foreground))] mb-1">Phone number</p>
+          <p className="text-sm text-[hsl(var(--foreground))] px-3 py-2 rounded-lg bg-[hsl(var(--muted))] border border-[hsl(var(--border))]">
+            {phoneDisplay}
+          </p>
+          <p className="text-[11px] text-[hsl(var(--muted-foreground))] mt-1">WhatsApp privacy ID — cannot be edited</p>
+        </div>
+        <div className="mb-4">
+          <label className="text-xs font-medium text-[hsl(var(--muted-foreground))] mb-1 block">
+            Name <span className="text-red-400">*</span>
+          </label>
+          <input
+            ref={inputRef}
+            value={name}
+            onChange={e => {
+              setName(e.target.value);
+              setError(null);
+            }}
+            onKeyDown={e => e.key === 'Enter' && handleSave()}
+            placeholder="e.g. Rahul Sharma"
+            className="w-full rounded-lg border border-[hsl(var(--border))] bg-transparent px-3 py-2 text-sm text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-1 focus:ring-[hsl(var(--green))]"
+          />
+          {error && <p className="text-xs text-red-400 mt-1">{error}</p>}
+        </div>
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            disabled={isPending}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium border border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] transition-colors disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={isPending || !name.trim()}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#22C55E]/20 border border-[#22C55E]/30 text-[hsl(var(--green))] hover:bg-[#22C55E]/30 transition-colors disabled:opacity-50"
+          >
+            {isPending ? 'Saving…' : 'Save contact'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Edit Contact Modal ───────────────────────────────────────────────────────
+// Always renders ContactInfoForm in edit mode (isEditing={true}).
+// The key prop on ContactInfoForm resets its internal state each time the
+// modal opens, so stale form values never bleed through from a previous open.
+// No useEffect needed to reset isEditing — it's not tracked as state here.
+
+interface EditContactModalProps {
+  open: boolean;
+  contactId: string;
+  onClose: () => void;
+}
+
+function EditContactModal({ open, contactId, onClose }: EditContactModalProps) {
+  const { data: contact, isLoading } = useContact(open ? contactId : null);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-md mx-4 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-xl overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[hsl(var(--border))]">
+          <h3 className="text-sm font-semibold text-[hsl(var(--foreground))]">Edit contact</h3>
+          <button
+            onClick={onClose}
+            className="p-1 rounded-md hover:bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] transition-colors"
+          >
+            <X size={14} />
+          </button>
+        </div>
+        {isLoading || !contact ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 size={20} className="animate-spin text-[hsl(var(--muted-foreground))]" />
+          </div>
+        ) : (
+          <ContactInfoForm key={`${contact.id}-${open}`} contact={contact} isEditing={true} onSaved={onClose} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── ThreadView ───────────────────────────────────────────────────────────────
 
 export default function ThreadView({ conversationId, onBack }: ThreadViewProps) {
   const tenantId = useAuthStore.getState().tenant?.id ?? '';
@@ -31,15 +162,13 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
   const scrollRef = useRef<HTMLDivElement>(null);
   const isFirstLoad = useRef(true);
 
-  // ── "Saved as contact" confirmation state ──────────────────────────────
-  // Tracked alongside which conversationId it was saved for, so switching
-  // conversations automatically invalidates the old confirmation without
-  // needing a useEffect to reset it (avoids the "setState in effect" lint —
-  // see https://react.dev/learn/you-might-not-need-an-effect). The derived
-  // `isSavedForCurrentConv` below is what should actually be rendered.
   const [savedContact, setSavedContact] = useState(false);
   const [savedContactConvId, setSavedContactConvId] = useState<string | null>(null);
   const isSavedForCurrentConv = savedContact && savedContactConvId === conversationId;
+
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [isSavingName, setIsSavingName] = useState(false);
 
   const { subscribe, unsubscribe } = useWebSocket();
   const { data: conversation } = useConversation(conversationId);
@@ -48,9 +177,8 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
 
   const markAsRead = useMarkAsRead();
   const sendMessage = useSendMessage(conversationId);
-  const saveAsContact = useCreateContactFromConversation();
+  const createFromConversation = useCreateContactFromConversation();
 
-  // ── Mark as read when conversation opens ──────────────────────────────────
   useEffect(() => {
     if (conversationId && conversation?.unreadCount) {
       markAsRead.mutate(conversationId);
@@ -58,7 +186,6 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
 
-  // ── Scroll to bottom on first load only ───────────────────────────────────
   useEffect(() => {
     if (isLoading) return;
     if (isFirstLoad.current && messages.length > 0) {
@@ -67,7 +194,6 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
     }
   }, [isLoading, messages.length]);
 
-  // ── Scroll to bottom when a NEW message arrives (not on load-older) ───────
   const prevLengthRef = useRef(0);
   useEffect(() => {
     const prev = prevLengthRef.current;
@@ -76,14 +202,11 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
       const lastMsg = messages[curr - 1];
       const isNew =
         lastMsg && (lastMsg.direction === 'OUTBOUND' || Date.now() - new Date(lastMsg.createdAt).getTime() < 5000);
-      if (isNew) {
-        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-      }
+      if (isNew) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
     prevLengthRef.current = curr;
   }, [messages]);
 
-  // ── WebSocket — append incoming messages in real time ─────────────────────
   const handleIncoming = useCallback(
     (event: {
       conversationId: string;
@@ -97,7 +220,6 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
       createdAt: string;
     }) => {
       if (event.conversationId !== conversationId) return;
-
       const newMessage: Message = {
         id: event.messageId,
         conversationId: event.conversationId,
@@ -115,21 +237,20 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
         tenantId,
         sessionId: conversation?.sessionId ?? '',
       };
-
       queryClient.setQueryData(
         conversationKeys.messages(tenantId, conversationId),
         (old: InfiniteData<CursorPaginatedResponse<Message>> | undefined) => {
           if (!old) return old;
           const lastPage = old.pages[old.pages.length - 1];
-          return {
-            ...old,
-            pages: [...old.pages.slice(0, -1), { ...lastPage, data: [...lastPage.data, newMessage] }],
-          };
+          return { ...old, pages: [...old.pages.slice(0, -1), { ...lastPage, data: [...lastPage.data, newMessage] }] };
         },
       );
-
       markAsRead.mutate(conversationId);
     },
+    // markAsRead.mutate is stable across renders (TanStack Query guarantees this),
+    // but ESLint can't verify that — suppress rather than add markAsRead which
+    // would cause infinite re-subscription loops.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [conversationId, tenantId, queryClient, conversation?.sessionId],
   );
 
@@ -145,7 +266,6 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
       createdAt: string;
     }) => {
       if (event.conversationId !== conversationId) return;
-
       const newMessage: Message = {
         id: event.messageId,
         conversationId: event.conversationId,
@@ -162,19 +282,14 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
         tenantId,
         sessionId: conversation?.sessionId ?? '',
       };
-
       queryClient.setQueryData(
         conversationKeys.messages(tenantId, conversationId),
         (old: InfiniteData<CursorPaginatedResponse<Message>> | undefined) => {
           if (!old) return old;
           const lastPage = old.pages[old.pages.length - 1];
-          // Avoid duplicate if this message ID is already in cache
           const alreadyExists = old.pages.some(p => p.data.some(m => m.id === newMessage.id));
           if (alreadyExists) return old;
-          return {
-            ...old,
-            pages: [...old.pages.slice(0, -1), { ...lastPage, data: [...lastPage.data, newMessage] }],
-          };
+          return { ...old, pages: [...old.pages.slice(0, -1), { ...lastPage, data: [...lastPage.data, newMessage] }] };
         },
       );
     },
@@ -191,7 +306,6 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
     return () => unsubscribe('message:received', handleIncoming);
   }, [subscribe, unsubscribe, handleIncoming]);
 
-  // ── WebSocket — update message status on ack ──────────────────────────────
   const handleAck = useCallback(
     (event: { messageId: string; status: string }) => {
       queryClient.setQueryData(
@@ -203,9 +317,7 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
             pages: old.pages.map(page => ({
               ...page,
               data: page.data.map(msg => {
-                if (msg.id === event.messageId) {
-                  console.log('[ACK] found message, updating to:', event.status);
-                }
+                if (msg.id === event.messageId) console.log('[ACK] found message, updating to:', event.status);
                 return msg.id === event.messageId ? { ...msg, status: event.status as Message['status'] } : msg;
               }),
             })),
@@ -221,9 +333,15 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
     return () => unsubscribe('message:ack', handleAck);
   }, [subscribe, unsubscribe, handleAck]);
 
-  // ── Send handler — text or media ──────────────────────────────────────────
   const handleSend = useCallback(
-    (payload: { text?: string; mediaUrl?: string; mediaType?: string; caption?: string; type: string }) => {
+    (payload: {
+      text?: string;
+      mediaUrl?: string;
+      mediaType?: string;
+      caption?: string;
+      type: string;
+      conversationId?: string;
+    }) => {
       if (!conversation) return;
       sendMessage.mutate({
         sessionId: conversation.sessionId,
@@ -239,33 +357,80 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
     [conversation, conversationId, sendMessage],
   );
 
-  // ── Load older messages — preserve scroll position ────────────────────────
   const handleLoadOlder = useCallback(async () => {
     const el = scrollRef.current;
     const prevScrollHeight = el?.scrollHeight ?? 0;
     await fetchOlderMessages();
     requestAnimationFrame(() => {
-      if (el) {
-        el.scrollTop += el.scrollHeight - prevScrollHeight;
-      }
+      if (el) el.scrollTop += el.scrollHeight - prevScrollHeight;
     });
   }, [fetchOlderMessages]);
 
-  // ── Save as contact handler ───────────────────────────────────────────────
-  const handleSaveAsContact = useCallback(() => {
-    saveAsContact.mutate(conversationId, {
-      onSuccess: () => {
+  const handleSaveConfirm = useCallback(
+    async (name: string) => {
+      setIsSavingName(true);
+      try {
+        let contactId: string;
+        try {
+          const contact = await createFromConversation.mutateAsync(conversationId);
+          contactId = contact.id;
+        } catch (err: unknown) {
+          const axiosErr = err as { response?: { status?: number } };
+          if (axiosErr?.response?.status === 409 && conversation?.contactId) {
+            contactId = conversation.contactId;
+          } else {
+            throw err;
+          }
+        }
+        await contactsApi.update(tenantId, contactId, { name });
+        queryClient.invalidateQueries({ queryKey: ['contacts', tenantId] });
+        setSaveModalOpen(false);
         setSavedContact(true);
         setSavedContactConvId(conversationId);
-      },
-    });
-  }, [conversationId, saveAsContact]);
+        queryClient.invalidateQueries({ queryKey: conversationKeys.detail(tenantId, conversationId) });
+        queryClient.invalidateQueries({ queryKey: ['conversations', tenantId] });
+      } catch {
+        // leave modal open
+      } finally {
+        setIsSavingName(false);
+      }
+    },
+    [conversationId, conversation, createFromConversation, queryClient, tenantId],
+  );
 
   const displayName = conversation?.contact?.name ?? conversation?.contactName ?? conversation?.phoneNumber;
   const hasContact = !!conversation?.contactId || isSavedForCurrentConv;
+  const contactId = conversation?.contactId ?? null;
+
+  const phoneDisplay = conversation?.phoneNumber
+    ? conversation.phoneNumber.includes('@')
+      ? conversation.phoneNumber.split('@')[0]
+      : conversation.phoneNumber
+    : '';
 
   return (
     <div className="flex flex-col h-full">
+      <SaveContactModal
+        key={saveModalOpen ? conversationId : 'closed'}
+        open={saveModalOpen}
+        phoneDisplay={phoneDisplay}
+        onSave={handleSaveConfirm}
+        onClose={() => setSaveModalOpen(false)}
+        isPending={isSavingName}
+      />
+
+      {contactId && (
+        <EditContactModal
+          open={editModalOpen}
+          contactId={contactId}
+          onClose={() => {
+            setEditModalOpen(false);
+            queryClient.invalidateQueries({ queryKey: conversationKeys.detail(tenantId, conversationId) });
+            queryClient.invalidateQueries({ queryKey: ['conversations', tenantId] });
+          }}
+        />
+      )}
+
       {/* ── Header ── */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-[hsl(var(--border))] bg-[hsl(var(--background))] shrink-0">
         {onBack && (
@@ -277,11 +442,9 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
             <ArrowLeft size={18} />
           </button>
         )}
-
         <div className="h-9 w-9 rounded-full bg-[hsl(var(--green))] flex items-center justify-center text-white text-sm font-semibold uppercase shrink-0">
           {displayName?.charAt(0) ?? '?'}
         </div>
-
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-[hsl(var(--foreground))] truncate">{displayName ?? 'Loading…'}</p>
           {conversation?.session && (
@@ -289,19 +452,33 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
           )}
         </div>
 
-        {/* Save as Contact — only shown when no contact is linked */}
-        {!hasContact && (
+        {/* Edit contact — shown when a contact is linked */}
+        {hasContact && contactId && (
           <button
-            onClick={handleSaveAsContact}
-            disabled={saveAsContact.isPending}
-            title="Save as contact"
-            className="p-2 rounded-lg hover:bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--green))] transition-colors disabled:opacity-50"
+            onClick={() => setEditModalOpen(true)}
+            title="Edit contact"
+            className="p-2 rounded-lg hover:bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--green))] transition-colors"
           >
-            {saveAsContact.isPending ? <Loader2 size={16} className="animate-spin" /> : <UserPlus size={16} />}
+            <Pencil size={16} />
           </button>
         )}
 
-        {/* Saved confirmation — briefly shown after saving */}
+        {/* Save as Contact — shown when no contact is linked */}
+        {!hasContact && (
+          <button
+            onClick={() => setSaveModalOpen(true)}
+            disabled={createFromConversation.isPending || isSavingName}
+            title="Save as contact"
+            className="p-2 rounded-lg hover:bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--green))] transition-colors disabled:opacity-50"
+          >
+            {createFromConversation.isPending || isSavingName ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <UserPlus size={16} />
+            )}
+          </button>
+        )}
+
         {hasContact && isSavedForCurrentConv && (
           <div className="p-2 text-[hsl(var(--green))]" title="Contact saved">
             <Check size={16} />
@@ -328,7 +505,6 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
             </button>
           </div>
         )}
-
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 size={20} className="animate-spin text-[hsl(var(--muted-foreground))]" />
@@ -341,7 +517,6 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
         ) : (
           messages.map((msg: Message) => <MessageBubble key={msg.id} message={msg} />)
         )}
-
         <div ref={bottomRef} />
       </div>
 

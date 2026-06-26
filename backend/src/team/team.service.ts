@@ -9,7 +9,8 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
-import { UserRole } from '@prisma/client';
+import { AuditLogService } from '../audit-log/audit-log.service';
+import { UserRole, AuditAction } from '@prisma/client';
 import { Resend } from 'resend';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
@@ -17,7 +18,6 @@ import { InviteMemberDto } from './dto/invite-member.dto';
 import { AcceptInviteDto } from './dto/accept-invite.dto';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
 
-// Invite tokens expire after 72 hours
 const INVITE_TTL_HOURS = 72;
 
 @Injectable()
@@ -29,6 +29,7 @@ export class TeamService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly auditLog: AuditLogService,
   ) {
     this.resend = new Resend(this.configService.get<string>('RESEND_API_KEY'));
   }
@@ -81,7 +82,6 @@ export class TeamService {
     invitedById: string,
     dto: InviteMemberDto,
   ) {
-    // Check if email already has an active user in this tenant
     const existingUser = await this.prisma.user.findFirst({
       where: { tenantId, email: dto.email, deletedAt: null },
     });
@@ -91,9 +91,6 @@ export class TeamService {
       );
     }
 
-    // Upsert invitation — if a prior expired invite exists for this email,
-    // replace it. The @@unique([tenantId, email]) constraint means we can't
-    // have two pending invites for the same email in the same tenant.
     const existingInvite = await this.prisma.invitation.findUnique({
       where: { tenantId_email: { tenantId, email: dto.email } },
     });
@@ -136,6 +133,15 @@ export class TeamService {
       inviteUrl,
       dto.role,
     );
+
+    this.auditLog.log({
+      tenantId,
+      userId: invitedById,
+      action: AuditAction.CREATE,
+      entityType: 'Invitation',
+      entityId: invitation.id,
+      after: { email: dto.email, role: dto.role },
+    });
 
     this.logger.log(
       `Invitation sent to ${dto.email} for tenant ${tenantId} with role ${dto.role}`,
@@ -185,19 +191,7 @@ export class TeamService {
   }
 
   // ─── Accept invite (public — no auth) ────────────────────────────────────
-  //
-  // Returns the same tenant shape as AuthService.login/signup
-  // (id, name, slug, plan, isActive, createdAt) so the frontend never has to
-  // fall back to hand-built defaults (slug: '', plan: 'BASIC', etc.) for a
-  // newly-invited user's tenant. Previously `include: { tenant: { select: {
-  // id: true, name: true } } }` only fetched id/name.
-  //
-  // NOTE: refreshToken is still returned here in the data object — the
-  // controller is responsible for extracting it, setting it as the
-  // `refresh_token` httpOnly cookie, and stripping it before the response
-  // body reaches the client. This mirrors AuthController's pattern, where
-  // AuthService also returns refreshToken in its result and the controller
-  // strips it. Do not return refreshToken to the browser in the JSON body.
+
   async acceptInvite(token: string, dto: AcceptInviteDto) {
     const invitation = await this.prisma.invitation.findUnique({
       where: { token },
@@ -244,8 +238,6 @@ export class TeamService {
           data: { acceptedAt: new Date() },
         });
 
-        // Generate token pair inline — can't call AuthService here to avoid
-        // circular dependency; token generation is simple enough to inline.
         const jwtPayload = {
           sub: newUser.id,
           tenantId: newUser.tenantId,
@@ -271,6 +263,16 @@ export class TeamService {
         return { user: newUser, accessToken: at, refreshToken: rawRefresh };
       },
     );
+
+    // Audit — logged after transaction commits so userId exists in DB
+    this.auditLog.log({
+      tenantId: invitation.tenantId,
+      userId: user.id,
+      action: AuditAction.CREATE,
+      entityType: 'User',
+      entityId: user.id,
+      after: { email: user.email, role: user.role },
+    });
 
     this.logger.log(
       `Invitation accepted: ${invitation.email} joined tenant ${invitation.tenantId} as ${invitation.role}`,
@@ -312,7 +314,6 @@ export class TeamService {
 
     if (!invitation) throw new NotFoundException('Invitation not found.');
 
-    // Extend expiry and issue a fresh token
     const token = randomBytes(32).toString('hex');
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + INVITE_TTL_HOURS);
@@ -337,13 +338,23 @@ export class TeamService {
 
   // ─── Revoke invitation ────────────────────────────────────────────────────
 
-  async revokeInvite(tenantId: string, invitationId: string) {
+  async revokeInvite(tenantId: string, invitationId: string, actorId: string) {
     const invitation = await this.prisma.invitation.findFirst({
       where: { id: invitationId, tenantId },
     });
     if (!invitation) throw new NotFoundException('Invitation not found.');
 
     await this.prisma.invitation.delete({ where: { id: invitationId } });
+
+    this.auditLog.log({
+      tenantId,
+      userId: actorId,
+      action: AuditAction.DELETE,
+      entityType: 'Invitation',
+      entityId: invitationId,
+      before: { email: invitation.email, role: invitation.role },
+    });
+
     return { data: { message: 'Invitation revoked.' } };
   }
 
@@ -364,7 +375,6 @@ export class TeamService {
     });
     if (!target) throw new NotFoundException('User not found.');
 
-    // Prevent demoting the last TENANT_OWNER
     if (target.role === UserRole.TENANT_OWNER) {
       const ownerCount = await this.prisma.user.count({
         where: { tenantId, role: UserRole.TENANT_OWNER, deletedAt: null },
@@ -388,6 +398,16 @@ export class TeamService {
       },
     });
 
+    this.auditLog.log({
+      tenantId,
+      userId: actorId,
+      action: AuditAction.UPDATE,
+      entityType: 'User',
+      entityId: targetUserId,
+      before: { role: target.role },
+      after: { role: dto.role },
+    });
+
     return { data: updated };
   }
 
@@ -409,15 +429,22 @@ export class TeamService {
       );
     }
 
-    // Soft delete — preserves audit trail, campaign createdBy refs etc.
     await this.prisma.user.update({
       where: { id: targetUserId },
       data: { isActive: false, deletedAt: new Date() },
     });
 
-    // Invalidate their refresh tokens immediately
     await this.prisma.refreshToken.deleteMany({
       where: { userId: targetUserId },
+    });
+
+    this.auditLog.log({
+      tenantId,
+      userId: actorId,
+      action: AuditAction.DELETE,
+      entityType: 'User',
+      entityId: targetUserId,
+      before: { email: target.email, role: target.role },
     });
 
     this.logger.log(
@@ -470,7 +497,6 @@ export class TeamService {
         `,
       });
     } catch (err) {
-      // Log but don't throw — invitation row is already created. Admin can resend.
       this.logger.error(`Failed to send invite email to ${to}:`, err);
     }
   }

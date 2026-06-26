@@ -32,6 +32,7 @@ export interface Message {
 export interface ConversationContact {
   id: string;
   name: string;
+  whatsappName?: string | null;
   avatarUrl?: string | null;
   phoneNumber?: string;
   email?: string | null;

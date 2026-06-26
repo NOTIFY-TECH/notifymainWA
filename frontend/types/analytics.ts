@@ -32,4 +32,13 @@ export interface AgentStats {
   messagesReplied: number;
 }
 
+export interface RecentMessage {
+  id: string;
+  direction: 'INBOUND' | 'OUTBOUND';
+  body: string; // truncated to 80 chars server-side
+  status: string;
+  createdAt: string; // ISO string
+  displayName: string; // server-normalised contact name
+}
+
 export type AnalyticsPeriod = '24h' | '7d' | '30d' | '90d';

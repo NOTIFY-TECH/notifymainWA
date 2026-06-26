@@ -20,8 +20,12 @@ import { join } from 'path';
 import { MediaModule } from './media/media.module';
 import { ContactsModule } from './contacts/contacts.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
+import { CampaignTemplatesModule } from './campaign-templates/campaign-templates.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { TeamModule } from './team/team.module';
+import { ApiKeysModule } from './api-keys/api-keys.module';
+import { AuditLogModule } from './audit-log/audit-log.module';
+import { SupportModule } from './support/support.module';
 
 @Module({
   imports: [
@@ -56,8 +60,12 @@ import { TeamModule } from './team/team.module';
     ConversationsModule,
     ContactsModule,
     CampaignsModule,
+    CampaignTemplatesModule,
     TeamModule,
+    ApiKeysModule,
+    AuditLogModule,
     AnalyticsModule,
+    SupportModule,
     GatewayModule,
     HealthModule,
     MediaModule,
@@ -65,8 +73,8 @@ import { TeamModule } from './team/team.module';
       rootPath: join(process.cwd(), 'uploads'),
       serveRoot: '/uploads',
       serveStaticOptions: {
-        index: false, // don't serve directory listings
-        fallthrough: false, // 404 on missing files instead of passing through
+        index: false,
+        fallthrough: false,
       },
     }),
   ],

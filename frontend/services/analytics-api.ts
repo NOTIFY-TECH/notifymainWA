@@ -1,5 +1,12 @@
 import api from './api';
-import { OverviewStats, TimeSeriesPoint, DeliveryRateData, AgentStats, AnalyticsPeriod } from '@/types/analytics';
+import {
+  OverviewStats,
+  TimeSeriesPoint,
+  DeliveryRateData,
+  AgentStats,
+  RecentMessage,
+  AnalyticsPeriod,
+} from '@/types/analytics';
 import { ApiResponse } from '@/types/index';
 
 // ─── Analytics API ────────────────────────────────────────────────────────────
@@ -46,6 +53,14 @@ export const analyticsApi = {
     const response = await api.get<ApiResponse<TimeSeriesPoint[]>>(
       `/tenants/${tenantId}/analytics/campaigns/${campaignId}`,
     );
+    return response.data;
+  },
+
+  // ── Recent messages feed ──────────────────────────────────────────────────────
+  async getRecentMessages(tenantId: string, limit: number = 10): Promise<ApiResponse<RecentMessage[]>> {
+    const response = await api.get<ApiResponse<RecentMessage[]>>(`/tenants/${tenantId}/analytics/recent-messages`, {
+      params: { limit },
+    });
     return response.data;
   },
 };

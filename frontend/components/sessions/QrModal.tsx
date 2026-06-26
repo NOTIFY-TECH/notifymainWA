@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Loader2, AlertTriangle, Signal } from 'lucide-react';
+import { X, Loader2, AlertTriangle, Signal, CheckCircle2 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { sessionsApi } from '@/services/sessions-api';
 
@@ -15,16 +15,27 @@ interface QrModalProps {
 export function QrModal({ sessionId, sessionName, onClose, onConnected }: QrModalProps) {
   const [qrData, setQrData] = useState<string | null>(null);
   const [pollError, setPollError] = useState(false);
+  const [connected, setConnected] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queryClient = useQueryClient();
 
   const fetchQr = useCallback(async () => {
     try {
       const res = await sessionsApi.getQr(sessionId);
-      if (res.status === 'CONNECTED') {
+      if (res.status?.toUpperCase() === 'CONNECTED') {
         clearInterval(intervalRef.current!);
-        onConnected();
         queryClient.invalidateQueries({ queryKey: ['sessions'] });
+
+        // Show success state for 2s, then notify parent + close
+        setQrData(null);
+        setPollError(false);
+        setConnected(true);
+
+        successTimerRef.current = setTimeout(() => {
+          onConnected();
+          onClose();
+        }, 2000);
         return;
       }
       if (res.qrCode) {
@@ -48,64 +59,86 @@ export function QrModal({ sessionId, sessionName, onClose, onConnected }: QrModa
     return () => {
       clearTimeout(timer);
       if (intervalRef.current) clearInterval(intervalRef.current);
+      if (successTimerRef.current) clearTimeout(successTimerRef.current);
     };
   }, [fetchQr]);
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      onClick={e => e.target === e.currentTarget && onClose()}
+      onClick={e => e.target === e.currentTarget && !connected && onClose()}
     >
       <div className="relative w-full max-w-sm mx-4 glass rounded-2xl p-6 animate-fade-in">
         {/* header */}
         <div className="flex items-start justify-between mb-5">
           <div>
-            <h3 className="text-base font-semibold text-[hsl(var(--foreground))]">Scan to connect</h3>
+            <h3 className="text-base font-semibold text-[hsl(var(--foreground))]">
+              {connected ? 'Connected' : 'Scan to connect'}
+            </h3>
             <p className="text-sm text-[hsl(var(--muted-foreground))] mt-0.5 truncate max-w-[200px]">{sessionName}</p>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          {!connected && (
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg hover:bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
-        {/* QR area */}
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-56 h-56 bg-white rounded-xl flex items-center justify-center overflow-hidden">
-            {pollError ? (
-              <div className="flex flex-col items-center gap-2 text-center p-4">
-                <AlertTriangle className="w-8 h-8 text-red-500" />
-                <p className="text-xs text-gray-500">Failed to load QR</p>
-              </div>
-            ) : qrData ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={`data:image/png;base64,${qrData}`}
-                alt="WhatsApp QR Code"
-                className="w-full h-full object-contain"
-              />
-            ) : (
-              <div className="flex flex-col items-center gap-3">
-                <Loader2 className="w-8 h-8 text-[#22C55E] animate-spin" />
-                <p className="text-xs text-gray-400">Generating QR…</p>
-              </div>
-            )}
+        {connected ? (
+          /* success state */
+          <div className="flex flex-col items-center gap-4 py-6 animate-fade-in">
+            <div className="w-16 h-16 rounded-full bg-green-500/10 flex items-center justify-center">
+              <CheckCircle2 className="w-10 h-10 text-green-500" />
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-medium text-[hsl(var(--foreground))]">Connected successfully</p>
+              <p className="text-xs text-[hsl(var(--muted-foreground))] mt-1">
+                WhatsApp is now linked to this session.
+              </p>
+            </div>
           </div>
+        ) : (
+          <>
+            {/* QR area */}
+            <div className="flex flex-col items-center gap-4">
+              <div className="w-56 h-56 bg-white rounded-xl flex items-center justify-center overflow-hidden">
+                {pollError ? (
+                  <div className="flex flex-col items-center gap-2 text-center p-4">
+                    <AlertTriangle className="w-8 h-8 text-red-500" />
+                    <p className="text-xs text-gray-500">Failed to load QR</p>
+                  </div>
+                ) : qrData ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={`data:image/png;base64,${qrData}`}
+                    alt="WhatsApp QR Code"
+                    className="w-full h-full object-contain"
+                  />
+                ) : (
+                  <div className="flex flex-col items-center gap-3">
+                    <Loader2 className="w-8 h-8 text-[#22C55E] animate-spin" />
+                    <p className="text-xs text-gray-400">Generating QR…</p>
+                  </div>
+                )}
+              </div>
 
-          <div className="flex items-center gap-2 text-xs text-[hsl(var(--muted-foreground))]">
-            <Signal className="w-3.5 h-3.5 text-green-500 animate-pulse" />
-            Waiting for scan · refreshes every 2s
-          </div>
-        </div>
+              <div className="flex items-center gap-2 text-xs text-[hsl(var(--muted-foreground))]">
+                <Signal className="w-3.5 h-3.5 text-green-500 animate-pulse" />
+                Waiting to be scanned.
+              </div>
+            </div>
 
-        {/* instructions */}
-        <ol className="mt-5 space-y-1.5 text-xs text-[hsl(var(--muted-foreground))] list-decimal list-inside">
-          <li>Open WhatsApp on your phone</li>
-          <li>Go to Settings → Linked Devices</li>
-          <li>Tap &ldquo;Link a Device&rdquo; and scan</li>
-        </ol>
+            {/* instructions */}
+            <ol className="mt-5 space-y-1.5 text-xs text-[hsl(var(--muted-foreground))] list-decimal list-inside">
+              <li>Open WhatsApp on your phone</li>
+              <li>Go to Settings → Linked Devices</li>
+              <li>Tap &ldquo;Link a Device&rdquo; and scan</li>
+            </ol>
+          </>
+        )}
       </div>
     </div>
   );

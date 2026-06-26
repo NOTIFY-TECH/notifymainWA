@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { useCreateContact } from '@/hooks/useContacts';
+import { useState, useRef, useMemo, useEffect } from 'react';
+import { useCreateContact, useDistinctTags } from '@/hooks/useContacts';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -13,12 +13,9 @@ interface AddContactModalProps {
   onClose: () => void;
 }
 
-const EMPTY = { name: '', phoneNumber: '', email: '', notes: '', tags: '' };
+const EMPTY = { name: '', phoneNumber: '', email: '', notes: '' };
 
 // ─── Client-side phone normalisation ─────────────────────────────────────────
-// Mirrors the backend phone.util.ts logic so the user sees an error instantly
-// without a round-trip. The backend still validates — this is UX, not security.
-
 function normalisePhone(raw: string): { normalised: string; error: string | null } {
   let digits = raw.trim();
 
@@ -55,8 +52,76 @@ function normalisePhone(raw: string): { normalised: string; error: string | null
 
 export default function AddContactModal({ open, onClose }: AddContactModalProps) {
   const [form, setForm] = useState(EMPTY);
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState('');
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  const tagContainerRef = useRef<HTMLDivElement>(null);
   const { mutateAsync, isPending } = useCreateContact();
+  const { data: existingTags = [] } = useDistinctTags();
+
+  // Suggestions: existing tags not already added, filtered by current input
+  const suggestions = useMemo(() => {
+    const typed = tagInput.trim().toLowerCase();
+    return existingTags
+      .filter(t => !tags.includes(t.tag))
+      .filter(t => (typed ? t.tag.toLowerCase().includes(typed) : true))
+      .slice(0, 8);
+  }, [existingTags, tags, tagInput]);
+
+  const safeHighlightedIndex = Math.min(highlightedIndex, Math.max(suggestions.length - 1, 0));
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (tagContainerRef.current && !tagContainerRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const commitTag = (tag: string) => {
+    const cleaned = tag.trim().toLowerCase();
+    if (!cleaned || tags.includes(cleaned)) return;
+    setTags(prev => [...prev, cleaned]);
+    setTagInput('');
+    setDropdownOpen(false);
+  };
+
+  const removeTag = (tag: string) => setTags(prev => prev.filter(t => t !== tag));
+
+  const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!dropdownOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      setDropdownOpen(true);
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightedIndex(Math.min(safeHighlightedIndex + 1, suggestions.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightedIndex(Math.max(safeHighlightedIndex - 1, 0));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (dropdownOpen && suggestions[safeHighlightedIndex]) {
+        commitTag(suggestions[safeHighlightedIndex].tag);
+      } else {
+        commitTag(tagInput);
+      }
+    } else if (e.key === 'Backspace' && !tagInput && tags.length > 0) {
+      // Remove last tag on backspace when input is empty
+      setTags(prev => prev.slice(0, -1));
+    } else if (e.key === 'Escape') {
+      setDropdownOpen(false);
+    } else if (e.key === ',') {
+      e.preventDefault();
+      commitTag(tagInput);
+    }
+  };
 
   const set = (field: keyof typeof EMPTY) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(prev => ({ ...prev, [field]: e.target.value }));
@@ -69,21 +134,18 @@ export default function AddContactModal({ open, onClose }: AddContactModalProps)
     const { normalised, error: phoneError } = normalisePhone(form.phoneNumber);
     if (phoneError) return setError(phoneError);
 
-    const tags = form.tags
-      .split(',')
-      .map(t => t.trim())
-      .filter(Boolean);
+    // Commit any partially-typed tag before submitting
+    const finalTags = tagInput.trim() ? [...new Set([...tags, tagInput.trim().toLowerCase()])] : tags;
 
     try {
       await mutateAsync({
         name: form.name.trim(),
-        phoneNumber: normalised, // send normalised value; backend will also normalise via @Transform
+        phoneNumber: normalised,
         email: form.email.trim() || undefined,
         notes: form.notes.trim() || undefined,
-        tags: tags.length > 0 ? tags : undefined,
+        tags: finalTags.length > 0 ? finalTags : undefined,
       });
-      setForm(EMPTY);
-      onClose();
+      handleClose();
     } catch (err: unknown) {
       const msg =
         err instanceof Error && 'response' in err
@@ -101,6 +163,9 @@ export default function AddContactModal({ open, onClose }: AddContactModalProps)
 
   const handleClose = () => {
     setForm(EMPTY);
+    setTags([]);
+    setTagInput('');
+    setDropdownOpen(false);
     setError(null);
     onClose();
   };
@@ -154,11 +219,70 @@ export default function AddContactModal({ open, onClose }: AddContactModalProps)
 
           {/* Tags */}
           <div className="space-y-1.5">
-            <Label htmlFor="ac-tags" className="text-xs font-medium text-[hsl(var(--muted-foreground))]">
-              Tags
-            </Label>
-            <Input id="ac-tags" placeholder="vip, lead, restaurant" value={form.tags} onChange={set('tags')} />
-            <p className="text-[11px] text-[hsl(var(--muted-foreground))]">Comma-separated</p>
+            <Label className="text-xs font-medium text-[hsl(var(--muted-foreground))]">Tags</Label>
+
+            {/* Selected tag chips */}
+            {tags.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-1">
+                {tags.map(tag => (
+                  <span
+                    key={tag}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-[#22C55E]/10 border border-[#22C55E]/20 text-[hsl(var(--green))]"
+                  >
+                    {tag}
+                    <button
+                      type="button"
+                      onClick={() => removeTag(tag)}
+                      className="hover:text-red-400 transition-colors"
+                      aria-label={`Remove tag ${tag}`}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Input + dropdown */}
+            <div ref={tagContainerRef} className="relative">
+              <input
+                id="ac-tags"
+                value={tagInput}
+                onChange={e => {
+                  setTagInput(e.target.value);
+                  setHighlightedIndex(0);
+                  setDropdownOpen(true);
+                }}
+                onFocus={() => setDropdownOpen(true)}
+                onKeyDown={handleTagKeyDown}
+                placeholder="Type to search or add a tag…"
+                className="w-full rounded-md border border-[hsl(var(--border))] bg-transparent px-3 py-1.5 text-sm placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-1 focus:ring-[hsl(var(--green))]"
+              />
+
+              {dropdownOpen && suggestions.length > 0 && (
+                <div className="absolute z-10 mt-1 w-full rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-lg overflow-hidden max-h-48 overflow-y-auto">
+                  {suggestions.map((s, i) => (
+                    <button
+                      key={s.tag}
+                      type="button"
+                      onMouseDown={e => e.preventDefault()} // keep input focused
+                      onClick={() => commitTag(s.tag)}
+                      className={`w-full flex items-center justify-between px-3 py-1.5 text-xs text-left transition-colors ${
+                        i === safeHighlightedIndex
+                          ? 'bg-[#22C55E]/10 text-[hsl(var(--green))]'
+                          : 'text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))]'
+                      }`}
+                    >
+                      <span>{s.tag}</span>
+                      <span className="text-[10px] text-[hsl(var(--muted-foreground))]">{s.count}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <p className="text-[11px] text-[hsl(var(--muted-foreground))]">
+              Press Enter or comma to add · Backspace removes last tag
+            </p>
           </div>
 
           {/* Notes */}

@@ -2,7 +2,6 @@
 
 import { useRouter } from 'next/navigation';
 import ConversationList from '@/components/inbox/ConversationList';
-import { EmptyState } from '@/components/ui/empty-state';
 import { MessageSquare } from 'lucide-react';
 
 export default function InboxPage() {

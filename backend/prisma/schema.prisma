@@ -134,41 +134,46 @@ enum AuditAction {
 // ─────────────────────────────────────────
 
 model Tenant {
-  id                 String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name               String           @db.VarChar(100)
-  slug               String           @unique @db.VarChar(50)
-  email              String           @unique @db.VarChar(255)
-  plan               SubscriptionPlan @default(BASIC)
-  isActive           Boolean          @default(true)
-  maxSessions        Int              @default(1)
-  maxMessages        Int              @default(1000)
-  maxContacts        Int              @default(500)
-  razorpayCustomerId String?          @db.VarChar(100)
-  metadata           Json?
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
-  deletedAt          DateTime?
-  invitations       Invitation[]
+  id                   String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                 String           @db.VarChar(100)
+  slug                 String           @unique @db.VarChar(50)
+  email                String           @unique @db.VarChar(255)
+  pendingEmail         String?          @db.VarChar(255)
+  emailVerifyToken     String?          @unique @db.VarChar(255)
+  emailVerifyExpiresAt DateTime?
+  plan                 SubscriptionPlan @default(BASIC)
+  isActive             Boolean          @default(true)
+  maxSessions          Int              @default(1)
+  maxMessages          Int              @default(1000)
+  maxContacts          Int              @default(500)
+  razorpayCustomerId   String?          @db.VarChar(100)
+  metadata             Json?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  deletedAt            DateTime?
+  invitations          Invitation[]
 
-  users         User[]
-  sessions      Session[]
-  contacts      Contact[]
-  conversations Conversation[]
-  campaigns     Campaign[]
-  apiKeys       ApiKey[]
-  webhooks      Webhook[]
-  auditLogs     AuditLog[]
-  messages      Message[]
-  subscription  Subscription?
-  invoices      Invoice[]
+  users               User[]
+  sessions            Session[]
+  contacts            Contact[]
+  conversations       Conversation[]
+  campaigns           Campaign[]
+  campaignTemplates   CampaignTemplate[]
+  apiKeys             ApiKey[]
+  webhooks            Webhook[]
+  auditLogs           AuditLog[]
+  messages            Message[]
+  subscription        Subscription?
+  invoices            Invoice[]
 
   @@index([slug])
   @@index([isActive])
+  @@index([emailVerifyToken])
   @@map("tenants")
 }
 
 // ─────────────────────────────────────────
-//  2: users
+//  users
 // ─────────────────────────────────────────
 
 model User {
@@ -203,7 +208,7 @@ model User {
 }
 
 // ─────────────────────────────────────────
-//  3: refresh_tokens
+//  refresh_tokens
 // ─────────────────────────────────────────
 
 model RefreshToken {
@@ -223,7 +228,7 @@ model RefreshToken {
 }
 
 // ─────────────────────────────────────────
-//  4: sessions (WhatsApp connections)
+//  sessions (WhatsApp connections)
 // ─────────────────────────────────────────
 
 model Session {
@@ -255,14 +260,15 @@ model Session {
 }
 
 // ─────────────────────────────────────────
-//  5: contacts
+//  contacts
 // ─────────────────────────────────────────
 
 model Contact {
   id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenantId    String    @db.Uuid
   phoneNumber String    @db.VarChar(50)
-  name        String    @db.VarChar(100)  
+  name        String    @db.VarChar(100)
+  whatsappName  String?   @db.VarChar(100)
   email       String?   @db.VarChar(255)
   avatarUrl   String?   @db.VarChar(500)
   notes       String?   @db.Text
@@ -285,7 +291,7 @@ model Contact {
 }
 
 // ─────────────────────────────────────────
-//  6: contact_tags
+//  contact_tags
 // ─────────────────────────────────────────
 
 model ContactTag {
@@ -303,7 +309,7 @@ model ContactTag {
 }
 
 // ─────────────────────────────────────────
-//  7: conversations
+//  conversations
 // ─────────────────────────────────────────
 
 model Conversation {
@@ -311,6 +317,7 @@ model Conversation {
   tenantId        String             @db.Uuid
   sessionId       String?            @db.Uuid
   contactId       String?            @db.Uuid
+  contactName     String?            @db.VarChar(100)
   phoneNumber     String             @db.VarChar(20)
   status          ConversationStatus @default(OPEN)
   assignedAgentId String?            @db.Uuid
@@ -338,7 +345,7 @@ model Conversation {
 }
 
 // ─────────────────────────────────────────
-//  8: messages
+//  messages
 // ─────────────────────────────────────────
 
 model Message {
@@ -380,20 +387,21 @@ model Message {
 }
 
 // ─────────────────────────────────────────
-//  9: campaigns
+//  campaigns
 // ─────────────────────────────────────────
 
 model Campaign {
   id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenantId        String         @db.Uuid
-  sessionId       String         @db.Uuid
+  sessionId       String?        @db.Uuid
   createdById     String         @db.Uuid
   name            String         @db.VarChar(100)
   description     String?        @db.Text
   status          CampaignStatus @default(DRAFT)
   messageTemplate String         @db.Text
   mediaUrl        String?        @db.VarChar(1000)
-   mediaType       String?        @db.VarChar(50)
+  mediaType       String?        @db.VarChar(50)
+  linkUrl         String?        @db.VarChar(2000)
   scheduledAt     DateTime?
   startedAt       DateTime?
   completedAt     DateTime?
@@ -408,7 +416,7 @@ model Campaign {
   updatedAt       DateTime       @updatedAt
 
   tenant    Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  session   Session           @relation(fields: [sessionId], references: [id])
+  session   Session?          @relation(fields: [sessionId], references: [id], onDelete: SetNull)
   createdBy User              @relation("CampaignCreator", fields: [createdById], references: [id])
   contacts  CampaignContact[]
   messages  Message[]
@@ -421,7 +429,7 @@ model Campaign {
 }
 
 // ─────────────────────────────────────────
-//  10: campaign_contacts
+//  campaign_contacts
 // ─────────────────────────────────────────
 
 model CampaignContact {
@@ -450,7 +458,27 @@ model CampaignContact {
 }
 
 // ─────────────────────────────────────────
-//  11: api_keys
+//  campaign_templates
+// ─────────────────────────────────────────
+
+model CampaignTemplate {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String   @db.Uuid
+  name            String   @db.VarChar(100)
+  messageBody     String   @db.Text
+  mediaUrl        String?  @db.VarChar(1000)
+  mediaType       String?  @db.VarChar(50)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("campaign_templates")
+}
+
+// ─────────────────────────────────────────
+//  api_keys
 // ─────────────────────────────────────────
 
 model ApiKey {
@@ -458,7 +486,7 @@ model ApiKey {
   tenantId    String    @db.Uuid
   name        String    @db.VarChar(100)
   keyHash     String    @unique @db.VarChar(255)
-  keyPrefix   String    @db.VarChar(10)
+  keyPrefix   String    @db.VarChar(12)
   permissions Json?
   lastUsedAt  DateTime?
   expiresAt   DateTime?
@@ -474,7 +502,7 @@ model ApiKey {
 }
 
 // ─────────────────────────────────────────
-//  12: webhooks
+//  webhooks
 // ─────────────────────────────────────────
 
 model Webhook {
@@ -499,7 +527,7 @@ model Webhook {
 }
 
 // ─────────────────────────────────────────
-//  13: webhook_deliveries
+//  webhook_deliveries
 // ─────────────────────────────────────────
 
 model WebhookDelivery {
@@ -525,7 +553,7 @@ model WebhookDelivery {
 }
 
 // ─────────────────────────────────────────
-//  14: audit_logs
+//  audit_logs
 // ─────────────────────────────────────────
 
 model AuditLog {
@@ -552,7 +580,7 @@ model AuditLog {
 }
 
 // ─────────────────────────────────────────
-//  15: subscriptions
+//  subscriptions
 // ─────────────────────────────────────────
 
 model Subscription {
@@ -578,7 +606,7 @@ model Subscription {
 }
 
 // ─────────────────────────────────────────
-//  16: invoices
+//  invoices
 // ─────────────────────────────────────────
 
 model Invoice {

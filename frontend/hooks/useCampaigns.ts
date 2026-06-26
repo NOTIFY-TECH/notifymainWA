@@ -26,7 +26,7 @@ export const campaignKeys = {
 // ─── useCampaigns ─────────────────────────────────────────────────────────────
 
 export function useCampaigns(filters?: ListCampaignsParams) {
-  const tenantId = useAuthStore.getState().tenant?.id ?? '';
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
 
   return useQuery({
     queryKey: campaignKeys.list(tenantId, filters),
@@ -39,7 +39,7 @@ export function useCampaigns(filters?: ListCampaignsParams) {
 // ─── useCampaign ──────────────────────────────────────────────────────────────
 
 export function useCampaign(campaignId: string | null) {
-  const tenantId = useAuthStore.getState().tenant?.id ?? '';
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
   const queryClient = useQueryClient();
   const { subscribe, unsubscribe } = useWebSocket();
 
@@ -50,11 +50,15 @@ export function useCampaign(campaignId: string | null) {
     select: (data: ApiResponse<CampaignDetail>) => data.data,
   });
 
-  // ── Live progress via campaign:progress WebSocket event ──
+  // ── Live progress via campaign:progress WebSocket event ──────────────────
+  // Patches aggregate counts + status AND individual CampaignContact statuses.
+  // The backend emits campaign:progress on every ack, and also emits
+  // message:ack with { messageId, externalId, status } which we use to update
+  // individual rows in the contacts array so the table updates live.
   useEffect(() => {
     if (!tenantId || !campaignId) return;
 
-    const handler = (payload: CampaignProgressEvent) => {
+    const handleProgress = (payload: CampaignProgressEvent) => {
       if (payload.campaignId !== campaignId) return;
 
       queryClient.setQueryData<ApiResponse<CampaignDetail>>(campaignKeys.detail(tenantId, campaignId), old => {
@@ -93,8 +97,43 @@ export function useCampaign(campaignId: string | null) {
       });
     };
 
-    subscribe<CampaignProgressEvent>('campaign:progress', handler);
-    return () => unsubscribe<CampaignProgressEvent>('campaign:progress', handler);
+    // ── Per-contact status update via message:ack ─────────────────────────
+    // The backend emits message:ack with { messageId, externalId, status }
+    // whenever a delivery receipt arrives. We match the messageId against
+    // CampaignContact.messageId in the cached contacts array and update that
+    // row's status + timestamp fields so the table reflects the live state
+    // without a full refetch.
+    const handleAck = (payload: { messageId: string; externalId: string; status: string }) => {
+      queryClient.setQueryData<ApiResponse<CampaignDetail>>(campaignKeys.detail(tenantId, campaignId), old => {
+        if (!old?.data?.contacts) return old;
+        const now = new Date().toISOString();
+        return {
+          ...old,
+          data: {
+            ...old.data,
+            contacts: old.data.contacts.map(c => {
+              if (c.messageId !== payload.messageId) return c;
+              const status = payload.status as typeof c.status;
+              return {
+                ...c,
+                status,
+                sentAt: status === 'SENT' ? (c.sentAt ?? now) : c.sentAt,
+                deliveredAt: status === 'DELIVERED' ? (c.deliveredAt ?? now) : c.deliveredAt,
+                readAt: status === 'READ' ? (c.readAt ?? now) : c.readAt,
+                failedAt: status === 'FAILED' ? (c.failedAt ?? now) : c.failedAt,
+              };
+            }),
+          },
+        };
+      });
+    };
+
+    subscribe<CampaignProgressEvent>('campaign:progress', handleProgress);
+    subscribe<{ messageId: string; externalId: string; status: string }>('message:ack', handleAck);
+    return () => {
+      unsubscribe<CampaignProgressEvent>('campaign:progress', handleProgress);
+      unsubscribe<{ messageId: string; externalId: string; status: string }>('message:ack', handleAck);
+    };
   }, [tenantId, campaignId, subscribe, unsubscribe, queryClient]);
 
   return query;
@@ -103,7 +142,7 @@ export function useCampaign(campaignId: string | null) {
 // ─── useCreateCampaign ────────────────────────────────────────────────────────
 
 export function useCreateCampaign() {
-  const tenantId = useAuthStore.getState().tenant?.id ?? '';
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -114,15 +153,10 @@ export function useCreateCampaign() {
   });
 }
 
-// ─── useUpdateCampaign ─────────────────────────────────────────────────────────
-//
-// Patches the detail cache directly with the full updated campaign returned
-// by the backend (PATCH returns the whole Campaign row, not just progress
-// fields like the other mutations) — simplest possible merge, no need to
-// cherry-pick fields since every field on the response is authoritative.
+// ─── useUpdateCampaign ────────────────────────────────────────────────────────
 
 export function useUpdateCampaign(campaignId: string) {
-  const tenantId = useAuthStore.getState().tenant?.id ?? '';
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -140,13 +174,10 @@ export function useUpdateCampaign(campaignId: string) {
   });
 }
 
-// ─── useLaunchCampaign ──────────────────────────────────────────────────────────
-//
-// Same direct-patch pattern as useUpdateCampaign — the launch response is
-// the full updated Campaign row (status now RUNNING/SCHEDULED, startedAt set).
+// ─── useLaunchCampaign ───────────────────────────────────────────────────────
 
 export function useLaunchCampaign(campaignId: string) {
-  const tenantId = useAuthStore.getState().tenant?.id ?? '';
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -164,21 +195,10 @@ export function useLaunchCampaign(campaignId: string) {
   });
 }
 
-// ─── useUploadCampaignRecipients ──────────────────────────────────────────────
-//
-// Separate mutation from useCreateCampaign — kept distinct because:
-// (a) it runs after creation with a known campaignId,
-// (b) its onSuccess scope is narrower (only the detail cache needs refreshing,
-//     not the full list — totalContacts on the list card will update via the
-//     detail invalidation cascading through the shared cache key prefix).
-//
-// The campaignId is passed at call time (mutateAsync(file)), not at hook
-// instantiation, because the ID isn't known until createCampaign resolves.
-// We thread it in via a wrapper object to keep mutateAsync's call signature
-// explicit and avoid closure-captured state going stale between the two steps.
+// ─── useUploadCampaignRecipients ─────────────────────────────────────────────
 
 export function useUploadCampaignRecipients() {
-  const tenantId = useAuthStore.getState().tenant?.id ?? '';
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -192,10 +212,10 @@ export function useUploadCampaignRecipients() {
   });
 }
 
-// ─── useCancelCampaign ────────────────────────────────────────────────────────
+// ─── useCancelCampaign ───────────────────────────────────────────────────────
 
 export function useCancelCampaign(campaignId: string) {
-  const tenantId = useAuthStore.getState().tenant?.id ?? '';
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -213,15 +233,10 @@ export function useCancelCampaign(campaignId: string) {
   });
 }
 
-// ─── useRetryFailedCampaign ───────────────────────────────────────────────────
-//
-// Patches the detail cache directly with the returned progress fields,
-// mirroring useCancelCampaign's pattern, since the backend already computes
-// and returns fresh progress in the same response — no need to wait for the
-// campaign:progress WebSocket event to update the failedCount/sentCount.
+// ─── useRetryFailedCampaign ──────────────────────────────────────────────────
 
 export function useRetryFailedCampaign(campaignId: string) {
-  const tenantId = useAuthStore.getState().tenant?.id ?? '';
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -249,14 +264,10 @@ export function useRetryFailedCampaign(campaignId: string) {
   });
 }
 
-// ─── useCloneCampaign ─────────────────────────────────────────────────────────
-//
-// Returns the full mutation result so the caller (ResendCampaignModal) can
-// read result.data.id and redirect to the new campaign's detail page.
-// Invalidates campaignKeys.all so the list picks up the new DRAFT on next visit.
+// ─── useCloneCampaign ────────────────────────────────────────────────────────
 
 export function useCloneCampaign(campaignId: string) {
-  const tenantId = useAuthStore.getState().tenant?.id ?? '';
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -267,26 +278,15 @@ export function useCloneCampaign(campaignId: string) {
   });
 }
 
-// ─── useAddCampaignContacts ───────────────────────────────────────────────────
-//
-// Handles two different API paths behind one mutation:
-//   - contactIds/tags  → POST .../contacts  (returns full progress + counts)
-//   - csvFile          → POST .../recipients/csv  (returns created/skipped only)
-//
-// For the contacts/tags path, the detail cache is patched directly with the
-// returned progress fields (same pattern as useRetryFailedCampaign).
-//
-// For the CSV path, the CSV endpoint doesn't return progress so we can't patch
-// directly — instead we just invalidate the detail query to force a refetch.
+// ─── useAddCampaignContacts ──────────────────────────────────────────────────
 
 export function useAddCampaignContacts(campaignId: string) {
-  const tenantId = useAuthStore.getState().tenant?.id ?? '';
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (data: { contactIds?: string[]; tags?: string[]; csvFile?: File }) => {
       if (data.csvFile) {
-        // CSV path — reuse the existing /recipients/csv endpoint.
         const result = await campaignsApi.uploadRecipientsCsv(tenantId, campaignId, data.csvFile);
         return {
           data: {
@@ -301,8 +301,6 @@ export function useAddCampaignContacts(campaignId: string) {
           success: true,
         } satisfies ApiResponse<AddContactsResult>;
       }
-
-      // contacts/tags path
       return campaignsApi.addContacts(tenantId, campaignId, {
         contactIds: data.contactIds,
         tags: data.tags,
@@ -311,14 +309,10 @@ export function useAddCampaignContacts(campaignId: string) {
 
     onSuccess: (result, variables) => {
       if (variables.csvFile) {
-        // CSV endpoint doesn't return progress — invalidate to force a refetch
         queryClient.invalidateQueries({
           queryKey: campaignKeys.detail(tenantId, campaignId),
         });
       } else {
-        // contacts/tags endpoint returns full progress — patch cache directly.
-        // status intentionally NOT touched here — addContactsToCampaign never
-        // changes status, and the API response doesn't include it.
         queryClient.setQueryData(
           campaignKeys.detail(tenantId, campaignId),
           (old: ApiResponse<CampaignDetail> | undefined) => {
@@ -337,7 +331,6 @@ export function useAddCampaignContacts(campaignId: string) {
           },
         );
       }
-      // Always refresh the list so campaign cards reflect the new totalContacts
       queryClient.invalidateQueries({ queryKey: campaignKeys.all(tenantId) });
     },
   });

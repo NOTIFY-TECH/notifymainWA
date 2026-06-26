@@ -20,6 +20,7 @@ export class ConversationsService {
     if (search) {
       where.OR = [
         { phoneNumber: { contains: search } },
+        { contactName: { contains: search, mode: 'insensitive' } },
         { contact: { name: { contains: search, mode: 'insensitive' } } },
         { lastMessageText: { contains: search, mode: 'insensitive' } },
       ];
@@ -33,7 +34,12 @@ export class ConversationsService {
         take: limit,
         include: {
           contact: {
-            select: { id: true, name: true, avatarUrl: true },
+            select: {
+              id: true,
+              name: true,
+              whatsappName: true,
+              avatarUrl: true,
+            },
           },
           session: {
             select: { id: true, name: true, phoneNumber: true },
@@ -51,8 +57,30 @@ export class ConversationsService {
       this.prisma.conversation.count({ where }),
     ]);
 
+    // Normalise display name server-side so the frontend never has to reason
+    // about JIDs. Resolution priority:
+    //   1. contact.name          — matched Contact row, CRM name set by tenant
+    //      (always wins when present — this is what the tenant deliberately saved,
+    //      and must NOT be overridden by whatever the recipient set as their own
+    //      WhatsApp display name, which may contain emoji/junk/a different name)
+    //   2. contact.whatsappName  — matched Contact row, name from WA profile
+    //      (fallback only when tenant hasn't set a CRM name for this contact)
+    //   3. conversation.contactName — pushName stored passively on inbound
+    //      (primary source for @lid chats where no Contact row exists)
+    //   4. phoneNumber           — raw JID / digits, always present
+    const data = conversations.map((conv) => ({
+      ...conv,
+      contactName:
+        conv.contact?.name?.trim() ||
+        conv.contact?.whatsappName?.trim() ||
+        conv.contactName?.trim() ||
+        (conv.phoneNumber.includes('@')
+          ? conv.phoneNumber.split('@')[0]
+          : conv.phoneNumber),
+    }));
+
     return {
-      data: conversations,
+      data,
       meta: {
         total,
         page,
@@ -72,6 +100,7 @@ export class ConversationsService {
           select: {
             id: true,
             name: true,
+            whatsappName: true,
             avatarUrl: true,
             phoneNumber: true,
             email: true,
@@ -95,7 +124,18 @@ export class ConversationsService {
       throw new NotFoundException(`Conversation ${conversationId} not found`);
     }
 
-    return { data: conversation };
+    // Same resolution priority as listConversations — normalise contactName
+    // so ThreadView always gets a human-readable name, never a raw JID, and
+    // never overridden by a WhatsApp-side display name when a CRM name exists.
+    const contactName =
+      conversation.contact?.name?.trim() ||
+      conversation.contact?.whatsappName?.trim() ||
+      conversation.contactName?.trim() ||
+      (conversation.phoneNumber.includes('@')
+        ? conversation.phoneNumber.split('@')[0]
+        : conversation.phoneNumber);
+
+    return { data: { ...conversation, contactName } };
   }
 
   // ── Get messages for a conversation ──────────────────────────────────────
