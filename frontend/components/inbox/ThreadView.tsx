@@ -180,11 +180,11 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
   const createFromConversation = useCreateContactFromConversation();
 
   useEffect(() => {
-    if (conversationId && conversation?.unreadCount) {
+    if (conversationId && conversation && conversation.unreadCount > 0) {
       markAsRead.mutate(conversationId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationId]);
+  }, [conversationId, conversation?.unreadCount]);
 
   useEffect(() => {
     if (isLoading) return;
@@ -254,6 +254,26 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
     [conversationId, tenantId, queryClient, conversation?.sessionId],
   );
 
+  const handleReaction = useCallback(
+    (event: { messageId: string; conversationId: string; reactions: Record<string, string[]> }) => {
+      if (event.conversationId !== conversationId) return;
+      queryClient.setQueryData(
+        conversationKeys.messages(tenantId, conversationId),
+        (old: InfiniteData<CursorPaginatedResponse<Message>> | undefined) => {
+          if (!old) return old;
+          return {
+            ...old,
+            pages: old.pages.map(page => ({
+              ...page,
+              data: page.data.map(msg => (msg.id === event.messageId ? { ...msg, reactions: event.reactions } : msg)),
+            })),
+          };
+        },
+      );
+    },
+    [conversationId, tenantId, queryClient],
+  );
+
   const handleOutgoingSynced = useCallback(
     (event: {
       conversationId: string;
@@ -305,6 +325,11 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
     subscribe('message:received', handleIncoming);
     return () => unsubscribe('message:received', handleIncoming);
   }, [subscribe, unsubscribe, handleIncoming]);
+
+  useEffect(() => {
+    subscribe('message:reaction', handleReaction);
+    return () => unsubscribe('message:reaction', handleReaction);
+  }, [subscribe, unsubscribe, handleReaction]);
 
   const handleAck = useCallback(
     (event: { messageId: string; status: string }) => {
@@ -515,7 +540,15 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
             <p className="text-xs text-[hsl(var(--muted-foreground))]">Send a message to start the conversation</p>
           </div>
         ) : (
-          messages.map((msg: Message) => <MessageBubble key={msg.id} message={msg} />)
+          messages.map((msg: Message) => (
+            <MessageBubble
+              key={msg.id}
+              message={msg}
+              sessionJid={
+                conversation?.session?.phoneNumber ? `${conversation.session.phoneNumber}@s.whatsapp.net` : undefined
+              }
+            />
+          ))
         )}
         <div ref={bottomRef} />
       </div>

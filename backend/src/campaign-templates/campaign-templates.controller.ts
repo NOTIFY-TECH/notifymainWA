@@ -29,10 +29,9 @@ export class CampaignTemplatesController {
     return this.service.list(tenantId);
   }
 
-  /** Only Owner/Admin can create */
   @Post()
   @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   create(
     @Param('tenantId', ParseUUIDPipe) tenantId: string,
     @Body() dto: CreateCampaignTemplateDto,
@@ -40,10 +39,9 @@ export class CampaignTemplatesController {
     return this.service.create(tenantId, dto);
   }
 
-  /** Only Owner/Admin can update */
   @Patch(':templateId')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   update(
     @Param('tenantId', ParseUUIDPipe) tenantId: string,
     @Param('templateId', ParseUUIDPipe) templateId: string,
@@ -52,10 +50,9 @@ export class CampaignTemplatesController {
     return this.service.update(tenantId, templateId, dto);
   }
 
-  /** Only Owner/Admin can delete */
   @Delete(':templateId')
   @UseGuards(RolesGuard)
-  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   remove(
     @Param('tenantId', ParseUUIDPipe) tenantId: string,
     @Param('templateId', ParseUUIDPipe) templateId: string,

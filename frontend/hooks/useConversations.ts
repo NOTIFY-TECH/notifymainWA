@@ -13,9 +13,21 @@ export const conversationKeys = {
   messages: (tenantId: string, id: string) => ['conversations', tenantId, 'messages', id] as const,
 };
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+type ConversationListCache = { data: Conversation[]; meta?: unknown };
+
+export function sortConversations(convs: Conversation[]): Conversation[] {
+  return [...convs].sort((a, b) => {
+    if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+    if (a.isPinned && b.isPinned) {
+      return new Date(b.pinnedAt ?? 0).getTime() - new Date(a.pinnedAt ?? 0).getTime();
+    }
+    return new Date(b.lastMessageAt ?? 0).getTime() - new Date(a.lastMessageAt ?? 0).getTime();
+  });
+}
+
 // ─── useConversations ─────────────────────────────────────────────────────────
-// Uses reactive store subscription so tenantId is always current and the
-// query re-enables automatically after auth rehydration.
 
 export function useConversations(filters?: { status?: string; sessionId?: string; search?: string }) {
   const tenantId = useAuthStore(s => s.tenant?.id ?? '');
@@ -26,7 +38,6 @@ export function useConversations(filters?: { status?: string; sessionId?: string
     queryFn: () => messagesApi.getConversations(tenantId, { ...filters, limit: 50 }),
     enabled: !!tenantId && rehydrated,
     refetchInterval: 30_000,
-    // Refetch when the tab regains focus so the list re-syncs on reopen
     refetchOnWindowFocus: true,
     select: data => data.data,
   });
@@ -95,11 +106,80 @@ export function useMarkAsRead() {
 
   return useMutation({
     mutationFn: (conversationId: string) => messagesApi.markAsRead(tenantId, conversationId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: conversationKeys.all(tenantId) });
+    },
+  });
+}
+
+// ─── usePinConversation ───────────────────────────────────────────────────────
+
+export function usePinConversation() {
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (conversationId: string) => messagesApi.pinConversation(tenantId, conversationId),
     onSuccess: (_, conversationId) => {
-      queryClient.setQueriesData<Conversation[]>({ queryKey: conversationKeys.all(tenantId) }, old => {
-        if (!old) return old;
-        return old.map(c => (c.id === conversationId ? { ...c, unreadCount: 0 } : c));
+      const now = new Date().toISOString();
+      queryClient.setQueriesData<ConversationListCache>({ queryKey: conversationKeys.all(tenantId) }, old => {
+        if (!old?.data) return old;
+        const patched = old.data.map(c => (c.id === conversationId ? { ...c, isPinned: true, pinnedAt: now } : c));
+        return { ...old, data: sortConversations(patched) };
       });
+    },
+  });
+}
+
+// ─── useUnpinConversation ─────────────────────────────────────────────────────
+
+export function useUnpinConversation() {
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (conversationId: string) => messagesApi.unpinConversation(tenantId, conversationId),
+    onSuccess: (_, conversationId) => {
+      queryClient.setQueriesData<ConversationListCache>({ queryKey: conversationKeys.all(tenantId) }, old => {
+        if (!old?.data) return old;
+        const patched = old.data.map(c => (c.id === conversationId ? { ...c, isPinned: false, pinnedAt: null } : c));
+        return { ...old, data: sortConversations(patched) };
+      });
+    },
+  });
+}
+
+// ─── useArchiveConversation ───────────────────────────────────────────────────
+// Optimistically removes the conversation from the current list immediately.
+// The 30s poll will keep the archived view in sync. No need to add it to
+// an "Archived" cache — the user navigates there via the status tab which
+// triggers a fresh fetch with status=ARCHIVED.
+
+export function useArchiveConversation() {
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (conversationId: string) => messagesApi.archiveConversation(tenantId, conversationId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: conversationKeys.all(tenantId) });
+    },
+  });
+}
+
+// ─── useUnarchiveConversation ─────────────────────────────────────────────────
+// Removes the conversation from the archived list immediately. The regular
+// inbox will pick it up on next poll.
+
+export function useUnarchiveConversation() {
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (conversationId: string) => messagesApi.unarchiveConversation(tenantId, conversationId),
+    onSuccess: (_, conversationId) => {
+      // Invalidate all conversation list caches — prefix match catches all filter combos
+      queryClient.invalidateQueries({ queryKey: conversationKeys.all(tenantId) });
     },
   });
 }
@@ -125,13 +205,18 @@ export function useSendMessage(conversationId: string) {
         },
       );
 
-      queryClient.setQueriesData<Conversation[]>({ queryKey: conversationKeys.all(tenantId) }, old => {
-        if (!old) return old;
-        return old.map(c =>
-          c.id === conversationId
-            ? { ...c, lastMessageAt: newMessage.createdAt, lastMessageText: newMessage.body ?? '' }
-            : c,
-        );
+      queryClient.setQueriesData<ConversationListCache>({ queryKey: conversationKeys.all(tenantId) }, old => {
+        if (!old?.data) return old;
+        return {
+          ...old,
+          data: sortConversations(
+            old.data.map(c =>
+              c.id === conversationId
+                ? { ...c, lastMessageAt: newMessage.createdAt, lastMessageText: newMessage.body ?? '' }
+                : c,
+            ),
+          ),
+        };
       });
     },
   });

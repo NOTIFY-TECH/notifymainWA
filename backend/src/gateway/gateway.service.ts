@@ -37,6 +37,24 @@ export class GatewayService {
     this.server.to(`tenant:${tenantId}`).emit('message:ack', payload);
   }
 
+  // ── Reaction event ────────────────────────────────────────────────────────
+  // Emitted when a reaction is added or removed on a message.
+  // payload.reactions is the full updated reactions map for that message:
+  // { [emoji]: senderJid[] }  — frontend replaces the message's reactions
+  // in cache rather than trying to diff individual emoji changes.
+
+  emitMessageReaction(
+    tenantId: string,
+    payload: {
+      messageId: string;
+      conversationId: string;
+      reactions: Record<string, string[]>;
+    },
+  ) {
+    if (!this.server) return;
+    this.server.to(`tenant:${tenantId}`).emit('message:reaction', payload);
+  }
+
   emitCampaignProgress(
     tenantId: string,
     payload: {
@@ -69,5 +87,27 @@ export class GatewayService {
   ) {
     if (!this.server) return;
     this.server.to(`tenant:${tenantId}`).emit('session:sync_complete', payload);
+  }
+
+  // ── Decrypt-failure event ─────────────────────────────────────────────────
+  // Emitted when the engine receives a message it cannot decrypt (Baileys
+  // messageStubType === 2 / CIPHERTEXT). The content is unrecoverable — this
+  // event is visibility-only so the frontend can show a placeholder bubble
+  // ("Message could not be decrypted") instead of a blank gap in the thread.
+  // payload.conversationId may be null if no matching conversation exists yet.
+
+  emitMessageDecryptFailed(
+    tenantId: string,
+    payload: {
+      sessionId: string;
+      fromNumber: string;
+      conversationId: string | null;
+      timestamp: number;
+    },
+  ) {
+    if (!this.server) return;
+    this.server
+      .to(`tenant:${tenantId}`)
+      .emit('message:decrypt_failed', payload);
   }
 }

@@ -49,6 +49,12 @@ export class WebhooksProcessor extends WorkerHost {
       case 'message.ack':
         await this.handleMessageAck(job.data);
         break;
+      case 'message.reaction':
+        await this.handleMessageReaction(job.data);
+        break;
+      case 'message.decrypt_failed':
+        await this.handleMessageDecryptFailed(job.data);
+        break;
       default:
         this.logger.warn(`Unknown event type: ${job.name}`);
     }
@@ -113,7 +119,6 @@ export class WebhooksProcessor extends WorkerHost {
     this.logger.log(`Session disconnected: ${data.sessionId}`);
   }
 
-  // ── Chat list sync: signals frontend that sync is starting ───────────────
   private async handleSessionSyncStart(data: any): Promise<void> {
     const session = await this.prisma.session.findFirst({
       where: { openwaId: data.sessionId },
@@ -137,14 +142,18 @@ export class WebhooksProcessor extends WorkerHost {
   // ── Safely re-attach or delete orphaned null-sessionId conversations ──────
   //
   // The naive updateMany(sessionId: null → sessionId) fails with a unique
-  // constraint error when a live row for (tenantId, sessionId, phoneNumber)
-  // already exists — i.e. both an orphan AND a keeper exist for the same
-  // phone. This helper handles both cases:
-  //   • Keeper exists → delete the orphan (it's redundant; the upsert that
-  //     follows will update the keeper row instead).
-  //   • No keeper → re-stamp the orphan with the current sessionId so the
-  //     upsert below hits it via the unique index instead of creating a
-  //     second row.
+  // constraint error when:
+  //   a) A live row for (tenantId, sessionId, phoneNumber) already exists
+  //      (keeper exists) — updating any orphan would create a duplicate.
+  //   b) Multiple null-sessionId orphans exist for the same phoneNumber
+  //      (updating them all to the same sessionId creates duplicates among
+  //      themselves, even when no keeper exists).
+  //
+  // Strategy:
+  //   • Keeper exists → delete ALL orphans (redundant; upsert below hits keeper)
+  //   • No keeper → delete all orphans except the oldest one, then re-stamp
+  //     that single surviving orphan with the current sessionId so the upsert
+  //     below hits it via the unique index instead of creating a second row.
   private async reattachOrphan(
     tenantId: string,
     sessionId: string,
@@ -156,29 +165,49 @@ export class WebhooksProcessor extends WorkerHost {
     });
 
     if (keeperExists) {
-      // A live row already exists — orphan is redundant, delete it.
+      // Live row exists — all orphans are redundant, delete them all.
       await this.prisma.conversation.deleteMany({
         where: { tenantId, phoneNumber, sessionId: null },
       });
-    } else {
-      // No live row — safe to re-stamp the orphan.
-      await this.prisma.conversation.updateMany({
-        where: { tenantId, phoneNumber, sessionId: null },
-        data: { sessionId },
-      });
-    }
-  }
-
-  // ── Chat list sync: bulk-upsert conversations from chats.set payload ─────
-  private async handleSessionChatsSynced(data: any): Promise<void> {
-    const { sessionId, chats } = data;
-
-    if (!Array.isArray(chats) || chats.length === 0) {
-      this.logger.warn(
-        `session.chats_synced — no chats in payload for ${sessionId}`,
-      );
       return;
     }
+
+    // No live row — find all orphans for this phone.
+    const orphans = await this.prisma.conversation.findMany({
+      where: { tenantId, phoneNumber, sessionId: null },
+      select: { id: true },
+      orderBy: { createdAt: 'asc' }, // oldest first — keep the original
+    });
+
+    if (orphans.length === 0) return;
+
+    if (orphans.length > 1) {
+      // Delete all but the oldest orphan to avoid self-collision on updateMany.
+      const idsToDelete = orphans.slice(1).map((o) => o.id);
+      await this.prisma.conversation.deleteMany({
+        where: { id: { in: idsToDelete } },
+      });
+    }
+
+    // Re-stamp the single surviving orphan with the current sessionId.
+    await this.prisma.conversation.update({
+      where: { id: orphans[0].id },
+      data: { sessionId },
+    });
+  }
+
+  // ── FIX (session 24) ───────────────────────────────────────────────────
+  // The engine wraps every webhook body as { sessionId, payload: <data>, ... }
+  // (see SessionManager.emitWebhook in the engine). Every other handler in
+  // this file correctly reads `data.payload` for the actual content
+  // (see handleMessageReceived / handleMessageOutgoing below). This handler
+  // was incorrectly destructuring `chats` directly off the top-level `data`
+  // object, where it never existed — so `chats` was always undefined and
+  // every chat sync silently fell into the "no chats in payload" branch,
+  // even when the engine logs confirmed it emitted a populated chat list.
+  private async handleSessionChatsSynced(data: any): Promise<void> {
+    const { sessionId } = data;
+    const chats = data.payload?.chats ?? [];
 
     const session = await this.prisma.session.findFirst({
       where: { openwaId: sessionId },
@@ -189,6 +218,17 @@ export class WebhooksProcessor extends WorkerHost {
       this.logger.warn(
         `session.chats_synced — session not found: ${sessionId}`,
       );
+      return;
+    }
+
+    if (!Array.isArray(chats) || chats.length === 0) {
+      this.logger.warn(
+        `session.chats_synced — no chats in payload for ${sessionId} (sync watchdog fallback or genuinely empty chat list) — marking sync complete with 0 conversations`,
+      );
+      this.gatewayService.emitSessionSyncComplete(session.tenantId, {
+        sessionId,
+        conversationCount: 0,
+      });
       return;
     }
 
@@ -296,11 +336,32 @@ export class WebhooksProcessor extends WorkerHost {
     return result.valid ? result.normalised : null;
   }
 
+  // ── Strip JID suffix from a Baileys-supplied address ─────────────────────
+  //
+  // Baileys sends fromNumber / toNumber as full JIDs:
+  //   917999999999@s.whatsapp.net   (regular contacts)
+  //   12345678901234567890@lid      (linked-device contacts)
+  //
+  // Conversation.phoneNumber is stored as bare digits for regular contacts
+  // (e.g. 917999999999) — that's how campaigns and outbound sends write it.
+  // If we upsert with the full JID, the unique index (tenantId, sessionId,
+  // phoneNumber) finds no match and creates a duplicate conversation row.
+  //
+  // For @lid JIDs we leave them as-is (digits@lid) because we have no phone
+  // number to match against anyway — the existing conversation for that
+  // contact, if any, also has phoneNumber = the full @lid string.
+  private normaliseJid(jid: string): string {
+    if (jid.endsWith('@s.whatsapp.net')) {
+      return jid.split('@')[0]; // bare digits: 917999999999
+    }
+    // @lid, @g.us (groups), @broadcast, @newsletter — leave unchanged
+    return jid;
+  }
+
   private async handleMessageReceived(data: any): Promise<void> {
     try {
       const payload = data.payload ?? {};
 
-      // ── Dedup by externalId ──────────────────────────────────────────────
       const incomingExternalId: string | undefined =
         payload.externalId ?? payload.id ?? undefined;
 
@@ -329,14 +390,21 @@ export class WebhooksProcessor extends WorkerHost {
         return;
       }
 
-      const fromNumber: string = payload.from ?? data.from ?? '';
+      const rawFrom: string = payload.from ?? data.from ?? '';
 
-      if (fromNumber.endsWith('@newsletter')) {
+      if (rawFrom.endsWith('@newsletter')) {
         this.logger.debug(
-          `message.received — skipping newsletter broadcast from ${fromNumber}`,
+          `message.received — skipping newsletter broadcast from ${rawFrom}`,
         );
         return;
       }
+
+      // ── FIX (session 29) — strip @s.whatsapp.net suffix ─────────────────
+      // Baileys sends fromNumber as a full JID (e.g. 917999999999@s.whatsapp.net).
+      // Conversation.phoneNumber is stored as bare digits. Upserting with the
+      // full JID creates a duplicate conversation row instead of matching the
+      // existing one. @lid JIDs are left unchanged — no phone number to strip.
+      const fromNumber = this.normaliseJid(rawFrom);
 
       const rawType: string = payload.type?.toUpperCase() ?? 'TEXT';
       const ALLOWED_TYPES = [
@@ -352,7 +420,7 @@ export class WebhooksProcessor extends WorkerHost {
       const messageType = ALLOWED_TYPES.includes(rawType) ? rawType : 'TEXT';
 
       this.logger.debug(
-        `Message type raw=${rawType} normalised=${messageType} from=${fromNumber}`,
+        `Message type raw=${rawType} normalised=${messageType} from=${fromNumber} (raw JID: ${rawFrom})`,
       );
 
       const {
@@ -361,10 +429,19 @@ export class WebhooksProcessor extends WorkerHost {
         mediaType,
       } = this.extractMessageContent(payload, messageType, session.tenantId);
 
-      const now = new Date(data.timestamp ?? Date.now());
+      const now = new Date(payload.timestamp ?? data.timestamp ?? Date.now());
 
-      const matchPhone = this.resolveContactMatchPhone(payload, fromNumber);
+      const matchPhone = this.resolveContactMatchPhone(payload, rawFrom);
 
+      // ── FIX (session 29) — fetch contact.name for CRM name priority ──────
+      // Previously only fetched id + whatsappName. We now also fetch name so
+      // contactName written to the Conversation row respects the same priority
+      // order as ConversationsService.listConversations():
+      //   1. contact.name (CRM name set by the tenant)  ← highest priority
+      //   2. pushName (WhatsApp display name)
+      //   3. null / fallback
+      // Without this, every inbound message overwrote contactName with the
+      // raw pushName even when the tenant had a proper CRM name saved.
       const contact = matchPhone
         ? await this.prisma.contact.findUnique({
             where: {
@@ -373,7 +450,7 @@ export class WebhooksProcessor extends WorkerHost {
                 phoneNumber: matchPhone,
               },
             },
-            select: { id: true, whatsappName: true },
+            select: { id: true, name: true, whatsappName: true },
           })
         : null;
 
@@ -396,7 +473,12 @@ export class WebhooksProcessor extends WorkerHost {
         );
       }
 
-      // ── Re-attach orphaned null-session conversations ──────────────────────
+      // Resolve the contactName to write to the Conversation row.
+      // Priority: CRM name → pushName → null.
+      // We never overwrite a good CRM name with a raw WhatsApp pushName.
+      const resolvedContactName: string | null =
+        contact?.name?.trim() || incomingPushName || null;
+
       await this.reattachOrphan(session.tenantId, session.id, fromNumber);
 
       const conversation = await this.prisma.conversation.upsert({
@@ -412,7 +494,7 @@ export class WebhooksProcessor extends WorkerHost {
           sessionId: session.id,
           phoneNumber: fromNumber,
           contactId: contact?.id ?? null,
-          contactName: incomingPushName ?? null,
+          contactName: resolvedContactName,
           status: 'OPEN',
           unreadCount: 1,
           lastMessageAt: now,
@@ -423,7 +505,10 @@ export class WebhooksProcessor extends WorkerHost {
           lastMessageAt: now,
           lastMessageText: messageBody.slice(0, 500),
           ...(contact?.id ? { contactId: contact.id } : {}),
-          ...(incomingPushName ? { contactName: incomingPushName } : {}),
+          // Only update contactName when we have a resolved name.
+          // Never overwrite an existing CRM name with a bare pushName —
+          // the resolved value already respects priority (CRM > pushName).
+          ...(resolvedContactName ? { contactName: resolvedContactName } : {}),
           status: 'OPEN',
         },
       });
@@ -500,7 +585,15 @@ export class WebhooksProcessor extends WorkerHost {
         return;
       }
 
-      const toNumber: string = payload.to ?? '';
+      const rawTo: string = payload.to ?? '';
+
+      // ── FIX (session 29) — strip @s.whatsapp.net suffix ─────────────────
+      // Same JID normalisation as handleMessageReceived — outgoing messages
+      // sent from the phone app arrive via message.outgoing with a full JID
+      // in payload.to. Normalise before upsert to match the existing
+      // conversation row (stored as bare digits from the outbound send path).
+      const toNumber = this.normaliseJid(rawTo);
+
       const rawType: string = payload.type?.toUpperCase() ?? 'TEXT';
       const ALLOWED_TYPES = [
         'TEXT',
@@ -520,9 +613,9 @@ export class WebhooksProcessor extends WorkerHost {
         mediaType,
       } = this.extractMessageContent(payload, messageType, session.tenantId);
 
-      const now = new Date(data.timestamp ?? Date.now());
+      const now = new Date(payload.timestamp ?? data.timestamp ?? Date.now());
 
-      const matchPhone = this.resolveContactMatchPhone(payload, toNumber);
+      const matchPhone = this.resolveContactMatchPhone(payload, rawTo);
 
       const contact = matchPhone
         ? await this.prisma.contact.findUnique({
@@ -536,7 +629,6 @@ export class WebhooksProcessor extends WorkerHost {
           })
         : null;
 
-      // ── Re-attach orphaned null-session conversations (outgoing path) ──────
       await this.reattachOrphan(session.tenantId, session.id, toNumber);
 
       const conversation = await this.prisma.conversation.upsert({
@@ -603,6 +695,138 @@ export class WebhooksProcessor extends WorkerHost {
         error instanceof Error ? error.stack : undefined,
       );
       throw error;
+    }
+  }
+
+  private async handleMessageReaction(data: any): Promise<void> {
+    try {
+      const payload = data.payload ?? {};
+      const { targetExternalId, senderJid, emoji } = payload;
+
+      if (!targetExternalId || !senderJid) {
+        this.logger.warn(
+          `message.reaction — missing targetExternalId or senderJid, skipping`,
+        );
+        return;
+      }
+
+      const message = await this.prisma.message.findFirst({
+        where: { externalId: targetExternalId },
+        select: {
+          id: true,
+          tenantId: true,
+          conversationId: true,
+          reactions: true,
+        },
+      });
+
+      if (!message) {
+        this.logger.warn(
+          `message.reaction — no message found for externalId: ${targetExternalId}`,
+        );
+        return;
+      }
+
+      const current: Record<string, string[]> =
+        (message.reactions as Record<string, string[]>) ?? {};
+
+      const cleaned: Record<string, string[]> = {};
+      for (const [e, senders] of Object.entries(current)) {
+        const filtered = senders.filter((j) => j !== senderJid);
+        if (filtered.length > 0) cleaned[e] = filtered;
+      }
+
+      if (emoji && emoji.trim()) {
+        cleaned[emoji] = [...(cleaned[emoji] ?? []), senderJid];
+      }
+
+      await this.prisma.message.update({
+        where: { id: message.id },
+        data: { reactions: cleaned },
+      });
+
+      if (message.conversationId) {
+        this.gatewayService.emitMessageReaction(message.tenantId, {
+          messageId: message.id,
+          conversationId: message.conversationId,
+          reactions: cleaned,
+        });
+      }
+
+      this.logger.log(
+        `message.reaction — ${senderJid} ${emoji ? `reacted ${emoji}` : 'removed reaction'} on externalId ${targetExternalId}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `handleMessageReaction failed: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw error;
+    }
+  }
+
+  // ── Decrypt-failure handler ───────────────────────────────────────────────
+  // Fires when the engine receives a message it cannot decrypt (Baileys
+  // messageStubType === 2 / CIPHERTEXT). The message content is permanently
+  // lost — this handler only provides visibility:
+  //   1. Logs the event with session + sender info for debugging.
+  //   2. Looks up the conversation (if it exists) to attach a tenantId.
+  //   3. Emits a message:decrypt_failed WS event so the frontend can render
+  //      a "Message could not be decrypted" placeholder in the thread instead
+  //      of leaving a silent gap.
+  //
+  // Intentionally does NOT create a Message row — a row with no body and no
+  // externalId would be unrecoverable noise in the DB. The WS event is enough
+  // for the active frontend session; on refresh the placeholder disappears,
+  // which is acceptable given content is unrecoverable anyway.
+  private async handleMessageDecryptFailed(data: any): Promise<void> {
+    try {
+      const payload = data.payload ?? {};
+      const fromNumber: string = payload.from ?? payload.sender ?? '';
+
+      const session = await this.prisma.session.findFirst({
+        where: { openwaId: data.sessionId },
+        select: { id: true, tenantId: true },
+      });
+
+      if (!session) {
+        this.logger.warn(
+          `message.decrypt_failed — session not found: ${data.sessionId}, from: ${fromNumber}`,
+        );
+        return;
+      }
+
+      // Try to find an existing conversation so the frontend can route the
+      // placeholder to the right thread. Null if no conversation exists yet
+      // (e.g. first ever message from this contact failed to decrypt).
+      const conversation = fromNumber
+        ? await this.prisma.conversation.findFirst({
+            where: {
+              tenantId: session.tenantId,
+              sessionId: session.id,
+              phoneNumber: fromNumber,
+            },
+            select: { id: true },
+          })
+        : null;
+
+      this.gatewayService.emitMessageDecryptFailed(session.tenantId, {
+        sessionId: data.sessionId,
+        fromNumber,
+        conversationId: conversation?.id ?? null,
+        timestamp: data.timestamp ?? Date.now(),
+      });
+
+      this.logger.warn(
+        `message.decrypt_failed — session: ${data.sessionId}, from: ${fromNumber || '(unknown)'}, conversationId: ${conversation?.id ?? 'none'}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `handleMessageDecryptFailed failed: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      // Do not rethrow — a decrypt-failure handler crashing would be ironic
+      // and unhelpful. Log and move on.
     }
   }
 

@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { UserRole, INVITABLE_ROLES, ROLE_LABELS, TeamMember, PendingInvitation } from '@/types/team';
-import { Users, UserPlus, Loader2, Mail, Clock, RefreshCw, Trash2, ShieldCheck, X } from 'lucide-react';
+import { Users, UserPlus, Loader2, Mail, Clock, RefreshCw, Trash2, ShieldCheck, X, Lock } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 
 // ─── Role badge ───────────────────────────────────────────────────────────────
@@ -175,10 +175,54 @@ function RoleSelect({
   );
 }
 
+// ─── Access-denied state (Session 26) ─────────────────────────────────────────
+// Agents and Viewers no longer have visibility into the team roster. The
+// backend route is now guarded too (TeamController.listMembers — Owner/Admin
+// only), so this is purely a UX nicety: avoids a flash of a failed query /
+// 403 toast and instead explains why the page is empty for these roles.
+
+function TeamAccessDenied() {
+  return (
+    <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">
+      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[hsl(var(--muted))]">
+        <Lock size={16} className="text-[hsl(var(--muted-foreground))]" />
+      </div>
+      <div className="space-y-1">
+        <p className="text-sm font-medium text-[hsl(var(--foreground))]">You don&apos;t have access to this page</p>
+        <p className="text-xs text-[hsl(var(--muted-foreground))] max-w-xs">
+          Team management is only available to workspace owners and admins.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function TeamPage() {
   const currentUser = useAuthStore(s => s.user);
+
+  const isOwner = currentUser?.role === 'TENANT_OWNER';
+  const isAdminOrOwner = isOwner || currentUser?.role === 'TENANT_ADMIN';
+
+  // Session 26: gate the whole page for Agent/Viewer before any team data
+  // hooks run, so we never even attempt the now-restricted listMembers call.
+  if (!isAdminOrOwner) {
+    return <TeamAccessDenied />;
+  }
+
+  return <TeamPageContent currentUser={currentUser} isOwner={isOwner} isAdminOrOwner={isAdminOrOwner} />;
+}
+
+function TeamPageContent({
+  currentUser,
+  isOwner,
+  isAdminOrOwner,
+}: {
+  currentUser: ReturnType<typeof useAuthStore.getState>['user'];
+  isOwner: boolean;
+  isAdminOrOwner: boolean;
+}) {
   const { data: team, isLoading } = useTeam();
   const { mutate: resendInvite, isPending: isResending } = useResendInvite();
   const { mutate: revokeInvite, isPending: isRevoking } = useRevokeInvite();
@@ -187,9 +231,6 @@ export default function TeamPage() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
-
-  const isOwner = currentUser?.role === 'TENANT_OWNER';
-  const isAdminOrOwner = isOwner || currentUser?.role === 'TENANT_ADMIN';
 
   const handleRemove = (member: TeamMember) => {
     if (confirm(`Remove ${member.firstName} ${member.lastName} from the team? They will lose access immediately.`)) {

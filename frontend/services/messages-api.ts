@@ -31,8 +31,8 @@ export const messagesApi = {
     const response = await api.post<Message>(`/tenants/${tenantId}/messages`, {
       sessionId: data.sessionId,
       to: data.to,
-      type: data.type.toLowerCase(), // backend expects lowercase
-      text: data.text ?? data.body, // backend uses dto.text → stored as body
+      type: data.type.toLowerCase(),
+      text: data.text ?? data.body,
       mediaUrl: data.mediaUrl,
       mediaType: data.mediaType,
       caption: data.caption,
@@ -74,11 +74,68 @@ export const messagesApi = {
     return response.data;
   },
 
+  // ── Pin a conversation ────────────────────────────────────────────────────
+  async pinConversation(
+    tenantId: string,
+    conversationId: string,
+  ): Promise<ApiResponse<{ success: boolean; isPinned: boolean }>> {
+    const response = await api.patch<ApiResponse<{ success: boolean; isPinned: boolean }>>(
+      `/tenants/${tenantId}/conversations/${conversationId}/pin`,
+    );
+    return response.data;
+  },
+
+  // ── Unpin a conversation ──────────────────────────────────────────────────
+  async unpinConversation(
+    tenantId: string,
+    conversationId: string,
+  ): Promise<ApiResponse<{ success: boolean; isPinned: boolean }>> {
+    const response = await api.patch<ApiResponse<{ success: boolean; isPinned: boolean }>>(
+      `/tenants/${tenantId}/conversations/${conversationId}/unpin`,
+    );
+    return response.data;
+  },
+
+  // ── React to a message ────────────────────────────────────────────────────
+  // emoji = '' removes the reaction
+  async reactToMessage(
+    tenantId: string,
+    messageId: string,
+    emoji: string,
+    // senderJid removed — backend resolves this from session.phoneNumber
+  ): Promise<ApiResponse<{ success: boolean; reactions: Record<string, string[]> }>> {
+    const response = await api.post<ApiResponse<{ success: boolean; reactions: Record<string, string[]> }>>(
+      `/tenants/${tenantId}/messages/${messageId}/react`,
+      { emoji },
+    );
+    return response.data;
+  },
   // ── Search messages across conversations ──────────────────────────────────
   async search(tenantId: string, query: string, conversationId?: string): Promise<PaginatedResponse<Message>> {
     const response = await api.get<PaginatedResponse<Message>>(`/tenants/${tenantId}/messages/search`, {
       params: { query, conversationId },
     });
+    return response.data;
+  },
+  // ── Archive a conversation ────────────────────────────────────────────────
+  async archiveConversation(
+    tenantId: string,
+    conversationId: string,
+  ): Promise<ApiResponse<{ success: boolean; isArchived: boolean }>> {
+    const response = await api.patch<ApiResponse<{ success: boolean; isArchived: boolean }>>(
+      `/tenants/${tenantId}/conversations/${conversationId}/archive`,
+    );
+    return response.data;
+  },
+
+  // ── Unarchive a conversation ──────────────────────────────────────────────
+  async unarchiveConversation(
+    tenantId: string,
+    conversationId: string,
+  ): Promise<ApiResponse<{ success: boolean; isArchived: boolean }>> {
+    const response = await api.patch<ApiResponse<{ success: boolean; isArchived: boolean }>>(
+      `/tenants/${tenantId}/conversations/${conversationId}/unarchive`,
+    );
     return response.data;
   },
 };

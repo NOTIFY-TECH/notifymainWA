@@ -19,6 +19,12 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { IsString, IsOptional } from 'class-validator';
+
+class ReactToMessageDto {
+  @IsString()
+  emoji: string; // empty string = remove reaction
+}
 
 @ApiTags('Messages')
 @ApiBearerAuth()
@@ -50,5 +56,17 @@ export class MessagesController {
     @Query() query: ListMessagesDto,
   ) {
     return this.messagesService.listMessages(tenantId, query);
+  }
+
+  // POST /tenants/:tenantId/messages/:messageId/react
+  @Post(':messageId/react')
+  @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
+  async reactToMessage(
+    @Param('tenantId') tenantId: string,
+    @Param('messageId') messageId: string,
+    @Body() dto: ReactToMessageDto,
+  ) {
+    return this.messagesService.reactToMessage(tenantId, messageId, dto.emoji);
   }
 }

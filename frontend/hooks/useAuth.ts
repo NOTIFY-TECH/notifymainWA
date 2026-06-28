@@ -6,38 +6,35 @@ import { useAuthStore } from '@/store/authStore';
 import { useNotificationStore } from '@/store/notificationStore';
 import { LoginRequest, RegisterRequest } from '@/types/auth';
 import { clearAccessToken, setAccessToken } from '@/services/api';
-
-// ─── useAuth ──────────────────────────────────────────────────────────────────
-// Wraps auth actions in TanStack mutations so components get isPending,
-// isError, and error states for free.
+import { initializeSocket } from '@/hooks/useWebSocket';
 
 export const useAuth = () => {
   const router = useRouter();
   const { setAuth, logout: storeLogout, user, tenant, isAuthenticated } = useAuthStore();
   const { success, error: notifyError } = useNotificationStore();
 
-  // ── Login ──────────────────────────────────────────────────────────────────
   const loginMutation = useMutation({
     mutationFn: ({ tenantId, data }: { tenantId: string; data: LoginRequest }) => authApi.login(tenantId, data),
     onSuccess: response => {
       setAccessToken(response.accessToken);
       setAuth(response.user, response.tenant);
+      initializeSocket(response.accessToken, response.tenant.id);
       success('Welcome back', `Logged in as ${response.user.firstName}`);
-      router.push('/dashboard'); // ← was window.location.href
+      router.push('/dashboard');
     },
     onError: () => {
       notifyError('Login failed', 'Invalid email or password');
     },
   });
 
-  // ── Register ───────────────────────────────────────────────────────────────
   const registerMutation = useMutation({
     mutationFn: ({ tenantId, data }: { tenantId: string; data: RegisterRequest }) => authApi.register(tenantId, data),
     onSuccess: response => {
       setAccessToken(response.accessToken);
       setAuth(response.user, response.tenant);
+      initializeSocket(response.accessToken, response.tenant.id);
       success('Account created', `Welcome, ${response.user.firstName}!`);
-      router.push('/dashboard'); // ← was window.location.href
+      router.push('/dashboard');
     },
     onError: () => {
       notifyError('Registration failed', 'Please check your details and try again');
@@ -55,6 +52,7 @@ export const useAuth = () => {
     onSuccess: response => {
       setAccessToken(response.accessToken);
       setAuth(response.user, response.tenant);
+      initializeSocket(response.accessToken, response.tenant.id);
       success('Account created', `Welcome, ${response.user.firstName}!`);
       router.push('/dashboard');
     },
@@ -68,6 +66,7 @@ export const useAuth = () => {
     onSuccess: response => {
       setAccessToken(response.accessToken);
       setAuth(response.user, response.tenant);
+      initializeSocket(response.accessToken, response.tenant.id);
       success('Welcome back', `Logged in as ${response.user.firstName}`);
       router.push('/dashboard');
     },
@@ -76,7 +75,6 @@ export const useAuth = () => {
     },
   });
 
-  // ── Logout ─────────────────────────────────────────────────────────────────
   const logout = useCallback(async () => {
     try {
       await authApi.logout();
@@ -88,28 +86,23 @@ export const useAuth = () => {
   }, [storeLogout, router]);
 
   return {
-    // State
     user,
     tenant,
     isAuthenticated,
 
-    // Login
     login: loginMutation.mutate,
     isLoggingIn: loginMutation.isPending,
     loginError: loginMutation.error,
 
-    // Signup
     signup: signupMutation.mutate,
     isSigningUp: signupMutation.isPending,
     globalLogin: globalLoginMutation.mutate,
     isGlobalLoggingIn: globalLoginMutation.isPending,
 
-    // Register FOR internal testing (adding agents/managers to an existing tenant)
     register: registerMutation.mutate,
     isRegistering: registerMutation.isPending,
     registerError: registerMutation.error,
 
-    // Logout
     logout,
   };
 };

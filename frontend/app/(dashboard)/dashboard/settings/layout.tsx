@@ -2,18 +2,28 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Settings, User, Users, Key, Shield, LayoutTemplate } from 'lucide-react';
+import { Settings, User, Users, Shield, LayoutTemplate } from 'lucide-react';
+import { useAuthStore } from '@/store/authStore';
 
-const TABS = [
+const BASE_TABS = [
   { href: '/dashboard/settings', label: 'Profile', icon: User },
   { href: '/dashboard/settings/team', label: 'Team', icon: Users },
-  { href: '/dashboard/settings/api-keys', label: 'API Keys', icon: Key },
   { href: '/dashboard/settings/audit-log', label: 'Audit Log', icon: Shield },
   { href: '/dashboard/settings/templates', label: 'Templates', icon: LayoutTemplate },
 ];
 
+// Tabs hidden for AGENTs — they can still access Profile, Team, Templates
+// but Audit Log is owner/admin only.
+const AGENT_HIDDEN = new Set(['/dashboard/settings/audit-log']);
+
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const role = useAuthStore(s => s.user?.role);
+
+  const tabs = BASE_TABS.filter(tab => {
+    if (role === 'AGENT' && AGENT_HIDDEN.has(tab.href)) return false;
+    return true;
+  });
 
   return (
     <div className="flex flex-col gap-6">
@@ -28,7 +38,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
       </div>
 
       <div className="flex items-center gap-1 border-b border-[hsl(var(--border))]">
-        {TABS.map(tab => {
+        {tabs.map(tab => {
           const isActive = tab.href === '/dashboard/settings' ? pathname === tab.href : pathname.startsWith(tab.href);
 
           return (

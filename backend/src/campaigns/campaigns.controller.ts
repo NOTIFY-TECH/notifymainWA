@@ -35,16 +35,13 @@ import { UserRole } from '@prisma/client';
 import { AddCampaignContactsDto } from './dto/add-campaign-contacts.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
 
-// Accepted MIME types for the CSV upload endpoint.
-// Browsers and OS file pickers may send either of these for .csv files
-// depending on platform — both must be accepted.
 const CSV_MIME_TYPES = new Set([
   'text/csv',
-  'application/vnd.ms-excel', // Windows sends this for .csv
-  'text/plain', // some Linux/macOS pickers send this
+  'application/vnd.ms-excel',
+  'text/plain',
 ]);
 
-const MAX_CSV_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB — generous for a phone-number-only CSV
+const MAX_CSV_SIZE_BYTES = 5 * 1024 * 1024;
 
 @ApiTags('Campaigns')
 @ApiBearerAuth()
@@ -53,7 +50,6 @@ const MAX_CSV_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB — generous for a phone-num
 export class CampaignsController {
   constructor(private readonly campaignsService: CampaignsService) {}
 
-  // GET /tenants/:tenantId/campaigns
   @Get()
   @Roles(
     UserRole.TENANT_OWNER,
@@ -68,7 +64,6 @@ export class CampaignsController {
     return this.campaignsService.listCampaigns(tenantId, query);
   }
 
-  // POST /tenants/:tenantId/campaigns
   @Post()
   @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   createCampaign(
@@ -79,7 +74,6 @@ export class CampaignsController {
     return this.campaignsService.createCampaign(tenantId, req.user.userId, dto);
   }
 
-  // GET /tenants/:tenantId/campaigns/:campaignId
   @Get(':campaignId')
   @Roles(
     UserRole.TENANT_OWNER,
@@ -94,7 +88,6 @@ export class CampaignsController {
     return this.campaignsService.getCampaign(tenantId, campaignId);
   }
 
-  // PATCH /tenants/:tenantId/campaigns/:campaignId
   @Patch(':campaignId')
   @ApiOperation({ summary: 'Edit a draft or scheduled campaign' })
   @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
@@ -106,7 +99,6 @@ export class CampaignsController {
     return this.campaignsService.updateCampaign(tenantId, campaignId, dto);
   }
 
-  // POST /tenants/:tenantId/campaigns/:campaignId/launch
   @Post(':campaignId/launch')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Launch a draft campaign (starts sending)' })
@@ -114,11 +106,15 @@ export class CampaignsController {
   launchCampaign(
     @Param('tenantId') tenantId: string,
     @Param('campaignId') campaignId: string,
+    @Req() req: any,
   ) {
-    return this.campaignsService.launchCampaign(tenantId, campaignId);
+    return this.campaignsService.launchCampaign(
+      tenantId,
+      campaignId,
+      req.user.userId,
+    );
   }
 
-  // POST /tenants/:tenantId/campaigns/:campaignId/contacts
   @Post(':campaignId/contacts')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -138,18 +134,21 @@ export class CampaignsController {
     );
   }
 
-  // POST /tenants/:tenantId/campaigns/:campaignId/cancel
   @Post(':campaignId/cancel')
   @HttpCode(HttpStatus.OK)
   @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   cancelCampaign(
     @Param('tenantId') tenantId: string,
     @Param('campaignId') campaignId: string,
+    @Req() req: any,
   ) {
-    return this.campaignsService.cancelCampaign(tenantId, campaignId);
+    return this.campaignsService.cancelCampaign(
+      tenantId,
+      campaignId,
+      req.user.userId,
+    );
   }
 
-  // POST /tenants/:tenantId/campaigns/:campaignId/retry-failed
   @Post(':campaignId/retry-failed')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -163,7 +162,6 @@ export class CampaignsController {
     return this.campaignsService.retryFailedCampaign(tenantId, campaignId);
   }
 
-  // POST /tenants/:tenantId/campaigns/:campaignId/clone
   @Post(':campaignId/clone')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -182,7 +180,6 @@ export class CampaignsController {
     );
   }
 
-  // POST /tenants/:tenantId/campaigns/:campaignId/recipients/csv
   @Post(':campaignId/recipients/csv')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

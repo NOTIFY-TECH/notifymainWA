@@ -1,6 +1,7 @@
 import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AuditAction } from '@prisma/client';
+import { IsOptional, IsString, IsNumberString, IsEnum } from 'class-validator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { TenantGuard } from '../common/guards/tenant.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -9,10 +10,24 @@ import { UserRole } from '@prisma/client';
 import { AuditLogService } from './audit-log.service';
 
 class AuditLogQueryDto {
+  @IsOptional()
+  @IsNumberString()
   page?: number;
+
+  @IsOptional()
+  @IsNumberString()
   limit?: number;
+
+  @IsOptional()
+  @IsEnum(AuditAction)
   action?: AuditAction;
+
+  @IsOptional()
+  @IsString()
   from?: string;
+
+  @IsOptional()
+  @IsString()
   to?: string;
 }
 

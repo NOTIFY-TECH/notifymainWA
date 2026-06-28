@@ -236,7 +236,7 @@ model Session {
   tenantId         String        @db.Uuid
   createdById      String        @db.Uuid
   name             String        @db.VarChar(100)
-  phoneNumber      String?       @db.VarChar(20)
+  phoneNumber      String?       @db.VarChar(50)
   status           SessionStatus @default(INITIALIZING)
   openwaId         String?       @unique @db.VarChar(100)
   qrCode           String?       @db.Text
@@ -318,7 +318,7 @@ model Conversation {
   sessionId       String?            @db.Uuid
   contactId       String?            @db.Uuid
   contactName     String?            @db.VarChar(100)
-  phoneNumber     String             @db.VarChar(20)
+  phoneNumber     String             @db.VarChar(50)
   status          ConversationStatus @default(OPEN)
   assignedAgentId String?            @db.Uuid
   subject         String?            @db.VarChar(255)
@@ -326,6 +326,9 @@ model Conversation {
   lastMessageAt   DateTime?
   lastMessageText String?            @db.VarChar(500)
   snoozedUntil    DateTime?
+  isPinned        Boolean            @default(false)
+  pinnedAt        DateTime?
+  isArchived      Boolean            @default(false)
   metadata        Json?
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
@@ -341,6 +344,7 @@ model Conversation {
   @@index([tenantId, status])
   @@index([tenantId, assignedAgentId])
   @@index([lastMessageAt])
+  @@index([tenantId, isPinned, pinnedAt])
   @@map("conversations")
 }
 
@@ -365,6 +369,7 @@ model Message {
   caption        String?          @db.VarChar(1000)
   externalId     String?          @db.VarChar(100)
   errorMessage   String?          @db.VarChar(500)
+  reactions      Json?
   sentAt         DateTime?
   deliveredAt    DateTime?
   readAt         DateTime?

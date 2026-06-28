@@ -1,3 +1,5 @@
+import { BadRequestException } from '@nestjs/common';
+
 /**
  * Phone number normalisation + validation for NotifyTechAI.
  *
@@ -54,7 +56,11 @@ export function normalisePhone(raw: string): NormaliseResult {
   digits = digits.replace(/\D/g, '');
 
   if (digits.length === 0) {
-    return { normalised: '', valid: false, reason: 'Phone number contains no digits' };
+    return {
+      normalised: '',
+      valid: false,
+      reason: 'Phone number contains no digits',
+    };
   }
 
   // Bare 10-digit number: assume Indian mobile, prepend 91.
@@ -93,13 +99,12 @@ export function normalisePhone(raw: string): NormaliseResult {
  * Normalise and throw BadRequestException if invalid.
  * Convenience wrapper for use in service methods and CSV import loops.
  */
-export function normalisePhoneOrThrow(raw: string, label = 'Phone number'): string {
+export function normalisePhoneOrThrow(
+  raw: string,
+  label = 'Phone number',
+): string {
   const result = normalisePhone(raw);
   if (!result.valid) {
-    // Importing BadRequestException inline to keep this utility free of
-    // NestJS-specific imports at the top level — only used server-side but
-    // avoids a circular dependency if this file is ever shared.
-    const { BadRequestException } = require('@nestjs/common');
     throw new BadRequestException(`${label}: ${result.reason}`);
   }
   return result.normalised;

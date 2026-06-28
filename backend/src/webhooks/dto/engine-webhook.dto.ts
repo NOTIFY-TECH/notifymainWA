@@ -5,8 +5,12 @@ export class EngineWebhookDto {
     'message.received',
     'message.outgoing',
     'message.ack',
+    'message.reaction',
+    'message.decrypt_failed',
     'session.connected',
     'session.disconnected',
+    'session.sync_start',
+    'session.chats_synced',
   ])
   eventType: string;
 

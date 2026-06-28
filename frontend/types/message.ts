@@ -20,6 +20,9 @@ export interface Message {
   fromNumber: string;
   toNumber: string;
   externalId?: string;
+  // reactions: emoji → array of sender JIDs who reacted with that emoji
+  // e.g. { "👍": ["919876543210@s.whatsapp.net"] }
+  reactions?: Record<string, string[]> | null;
   sentAt?: string;
   deliveredAt?: string;
   readAt?: string;
@@ -58,19 +61,22 @@ export interface Conversation {
   id: string;
   tenantId: string;
   sessionId: string;
-  phoneNumber: string; // the contact's phone number
+  phoneNumber: string;
   contactId?: string | null;
-  contactName?: string | null; // convenience alias (may not exist — use contact.name)
+  contactName?: string | null;
   status: ConversationStatus;
   assignedAgentId?: string | null;
   subject?: string | null;
   unreadCount: number;
   lastMessageAt?: string | null;
   lastMessageText?: string | null;
-  lastMessage?: Message; // optionally populated
+  lastMessage?: Message;
   snoozedUntil?: string | null;
+  isPinned: boolean;
+  pinnedAt?: string | null;
   createdAt: string;
   updatedAt: string;
+  isArchived: boolean;
 
   // Included relations
   contact?: ConversationContact | null;

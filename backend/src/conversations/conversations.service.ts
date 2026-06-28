@@ -1,6 +1,12 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ListConversationsDto } from './dto/list-conversations.dto';
+import { AssignConversationDto } from './dto/assign-conversation.dto';
 
 @Injectable()
 export class ConversationsService {
@@ -15,8 +21,15 @@ export class ConversationsService {
     const skip = (page - 1) * limit;
 
     const where: any = { tenantId };
-    if (status) where.status = status;
     if (sessionId) where.sessionId = sessionId;
+    // Default: hide archived. Explicit ARCHIVED status filter shows only archived.
+    if (status === 'ARCHIVED') {
+      where.isArchived = true;
+      // Do NOT set where.status — ARCHIVED is not a ConversationStatus enum value
+    } else {
+      where.isArchived = false;
+      if (status) where.status = status; // OPEN / ASSIGNED / RESOLVED / SNOOZED only
+    }
     if (search) {
       where.OR = [
         { phoneNumber: { contains: search } },
@@ -29,7 +42,13 @@ export class ConversationsService {
     const [conversations, total] = await Promise.all([
       this.prisma.conversation.findMany({
         where,
-        orderBy: { lastMessageAt: 'desc' },
+        // Pinned conversations float to the top (pinnedAt desc for stable ordering
+        // between multiple pinned items), then the rest sorted by last activity.
+        orderBy: [
+          { isPinned: 'desc' },
+          { pinnedAt: 'desc' },
+          { lastMessageAt: 'desc' },
+        ],
         skip,
         take: limit,
         include: {
@@ -138,6 +157,204 @@ export class ConversationsService {
     return { data: { ...conversation, contactName } };
   }
 
+  // ── Pin conversation ──────────────────────────────────────────────────────
+
+  async pinConversation(tenantId: string, conversationId: string) {
+    // Verify the conversation belongs to this tenant
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, tenantId },
+      select: { id: true, isPinned: true },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException(`Conversation ${conversationId} not found`);
+    }
+
+    if (conversation.isPinned) {
+      // Already pinned — idempotent, return current state
+      return { data: { success: true, isPinned: true } };
+    }
+
+    // Enforce max-3 pinned conversations per tenant
+    const pinnedCount = await this.prisma.conversation.count({
+      where: { tenantId, isPinned: true },
+    });
+
+    if (pinnedCount >= 3) {
+      throw new BadRequestException(
+        'You can pin a maximum of 3 conversations. Unpin one before pinning another.',
+      );
+    }
+
+    await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: { isPinned: true, pinnedAt: new Date() },
+    });
+
+    this.logger.log(
+      `Pinned conversation ${conversationId} for tenant ${tenantId}`,
+    );
+    return { data: { success: true, isPinned: true } };
+  }
+
+  // ── Unpin conversation ────────────────────────────────────────────────────
+
+  async unpinConversation(tenantId: string, conversationId: string) {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, tenantId },
+      select: { id: true, isPinned: true },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException(`Conversation ${conversationId} not found`);
+    }
+
+    if (!conversation.isPinned) {
+      // Already unpinned — idempotent
+      return { data: { success: true, isPinned: false } };
+    }
+
+    await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: { isPinned: false, pinnedAt: null },
+    });
+
+    this.logger.log(
+      `Unpinned conversation ${conversationId} for tenant ${tenantId}`,
+    );
+    return { data: { success: true, isPinned: false } };
+  }
+
+  // ── Archive conversation ──────────────────────────────────────────────────
+
+  async archiveConversation(tenantId: string, conversationId: string) {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, tenantId },
+      select: { id: true, isArchived: true, isPinned: true },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException(`Conversation ${conversationId} not found`);
+    }
+
+    if (conversation.isArchived) {
+      return { data: { success: true, isArchived: true } };
+    }
+
+    // Unpin on archive if currently pinned
+    await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: {
+        isArchived: true,
+        ...(conversation.isPinned ? { isPinned: false, pinnedAt: null } : {}),
+      },
+    });
+
+    this.logger.log(
+      `Archived conversation ${conversationId} for tenant ${tenantId}`,
+    );
+    return { data: { success: true, isArchived: true } };
+  }
+
+  // ── Unarchive conversation ────────────────────────────────────────────────
+
+  async unarchiveConversation(tenantId: string, conversationId: string) {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, tenantId },
+      select: { id: true, isArchived: true },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException(`Conversation ${conversationId} not found`);
+    }
+
+    if (!conversation.isArchived) {
+      return { data: { success: true, isArchived: false } };
+    }
+
+    await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: { isArchived: false },
+    });
+
+    this.logger.log(
+      `Unarchived conversation ${conversationId} for tenant ${tenantId}`,
+    );
+    return { data: { success: true, isArchived: false } };
+  }
+
+  // ── Assign / unassign conversation ────────────────────────────────────────
+  // Session 27: backs the new Inbox — assign conversations permission row
+  // (Owner/Admin only — enforced in the controller via @Roles, not here).
+  // Passing userId: null (or omitting it) unassigns the conversation.
+
+  async assignConversation(
+    tenantId: string,
+    conversationId: string,
+    dto: AssignConversationDto,
+  ) {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, tenantId },
+      select: { id: true, status: true },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException(`Conversation ${conversationId} not found`);
+    }
+
+    const userId = dto.userId ?? null;
+
+    if (userId) {
+      // The assignee must belong to the same tenant and be active.
+      const assignee = await this.prisma.user.findFirst({
+        where: { id: userId, tenantId, isActive: true },
+        select: { id: true },
+      });
+
+      if (!assignee) {
+        throw new BadRequestException(
+          'Assignee must be an active member of this tenant.',
+        );
+      }
+    }
+
+    const updated = await this.prisma.conversation.update({
+      where: { id: conversationId },
+      data: {
+        assignedAgentId: userId,
+        // Mirror WhatsApp-Business-style status semantics: assigning moves an
+        // OPEN conversation to ASSIGNED; unassigning moves ASSIGNED back to
+        // OPEN. Conversations already RESOLVED/SNOOZED keep that status —
+        // assignment shouldn't silently reopen something the team closed.
+        ...(userId
+          ? conversation.status === 'OPEN'
+            ? { status: 'ASSIGNED' as const }
+            : {}
+          : conversation.status === 'ASSIGNED'
+            ? { status: 'OPEN' as const }
+            : {}),
+      },
+      include: {
+        assignedAgent: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            avatarUrl: true,
+          },
+        },
+      },
+    });
+
+    this.logger.log(
+      userId
+        ? `Assigned conversation ${conversationId} to user ${userId} for tenant ${tenantId}`
+        : `Unassigned conversation ${conversationId} for tenant ${tenantId}`,
+    );
+
+    return { data: updated };
+  }
+
   // ── Get messages for a conversation ──────────────────────────────────────
 
   async getMessages(
@@ -181,6 +398,7 @@ export class ConversationsService {
         deliveredAt: true,
         readAt: true,
         createdAt: true,
+        reactions: true,
         tenantId: true,
         sessionId: true,
       },

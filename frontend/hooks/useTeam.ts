@@ -21,12 +21,13 @@ export const teamKeys = {
 // ─── useTeam ──────────────────────────────────────────────────────────────────
 
 export function useTeam() {
-  const tenantId = useAuthStore.getState().tenant?.id ?? '';
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
+  const rehydrated = useAuthStore(s => s.rehydrated);
 
   return useQuery({
     queryKey: teamKeys.list(tenantId),
     queryFn: () => teamApi.listMembers(tenantId),
-    enabled: !!tenantId,
+    enabled: rehydrated && !!tenantId,
     select: (data: ApiResponse<TeamListResponse>) => data.data,
   });
 }
@@ -34,7 +35,7 @@ export function useTeam() {
 // ─── useInviteMember ──────────────────────────────────────────────────────────
 
 export function useInviteMember() {
-  const tenantId = useAuthStore.getState().tenant?.id ?? '';
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -48,7 +49,7 @@ export function useInviteMember() {
 // ─── useResendInvite ──────────────────────────────────────────────────────────
 
 export function useResendInvite() {
-  const tenantId = useAuthStore.getState().tenant?.id ?? '';
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
 
   return useMutation({
     mutationFn: (invitationId: string) => teamApi.resendInvite(tenantId, invitationId),
@@ -59,7 +60,7 @@ export function useResendInvite() {
 // ─── useRevokeInvite ──────────────────────────────────────────────────────────
 
 export function useRevokeInvite() {
-  const tenantId = useAuthStore.getState().tenant?.id ?? '';
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -73,7 +74,7 @@ export function useRevokeInvite() {
 // ─── useUpdateMemberRole ──────────────────────────────────────────────────────
 
 export function useUpdateMemberRole() {
-  const tenantId = useAuthStore.getState().tenant?.id ?? '';
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -98,7 +99,7 @@ export function useUpdateMemberRole() {
 // ─── useRemoveMember ──────────────────────────────────────────────────────────
 
 export function useRemoveMember() {
-  const tenantId = useAuthStore.getState().tenant?.id ?? '';
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
   const queryClient = useQueryClient();
 
   return useMutation({

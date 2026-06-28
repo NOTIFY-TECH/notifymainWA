@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   UnauthorizedException,
   NotFoundException,
 } from '@nestjs/common';
@@ -9,18 +10,22 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
 import { CreateUserDto } from '../users/dto/create-user.dto';
-import { UserRole } from '@prisma/client';
+import { UserRole, AuditAction } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import { SignupDto } from './dto/signup.dto';
+import { AuditLogService } from '../audit-log/audit-log.service';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private prisma: PrismaService,
     private usersService: UsersService,
     private jwtService: JwtService,
     private configService: ConfigService,
+    private auditLog: AuditLogService,
   ) {}
 
   async register(tenantId: string, dto: CreateUserDto) {
@@ -112,6 +117,17 @@ export class AuthService {
       data: { lastLoginAt: new Date(), loginCount: { increment: 1 } },
     });
 
+    // ── Audit log: LOGIN ──────────────────────────────────────────────────
+    this.auditLog.log({
+      tenantId: user.tenantId,
+      userId: user.id,
+      action: AuditAction.LOGIN,
+      entityType: 'User',
+      entityId: user.id,
+      ipAddress,
+      userAgent,
+    });
+
     const tokens = await this.generateTokenPair(
       user.id,
       user.tenantId,
@@ -158,6 +174,17 @@ export class AuthService {
     await this.prisma.user.update({
       where: { id: user.id },
       data: { lastLoginAt: new Date(), loginCount: { increment: 1 } },
+    });
+
+    // ── Audit log: LOGIN ──────────────────────────────────────────────────
+    this.auditLog.log({
+      tenantId,
+      userId: user.id,
+      action: AuditAction.LOGIN,
+      entityType: 'User',
+      entityId: user.id,
+      ipAddress,
+      userAgent,
     });
 
     const tokens = await this.generateTokenPair(

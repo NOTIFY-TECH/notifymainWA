@@ -52,7 +52,7 @@ export class ContactsController {
   }
 
   @Post()
-  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   createContact(
     @Param('tenantId') tenantId: string,
     @Body() dto: CreateContactDto,
@@ -74,7 +74,7 @@ export class ContactsController {
   }
   @Post('import')
   @UseInterceptors(FileInterceptor('file', { storage: memoryStorage() }))
-  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   importContacts(
     @Param('tenantId') tenantId: string,
     @UploadedFile() file: Express.Multer.File,

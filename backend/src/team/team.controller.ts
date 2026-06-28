@@ -37,10 +37,15 @@ export class TeamController {
   // ── Authenticated team routes, scoped to tenant ──────────────────────────
 
   // GET /tenants/:tenantId/team
-  // Any authenticated member can view the team — no @Roles() restriction.
+  // Session 26: restricted to Owner/Admin — Agents and Viewers no longer
+  // need (or should have) visibility into the team roster.
   @Get('tenants/:tenantId/team')
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard, TenantGuard)
+  @ApiOperation({
+    summary: 'List team members and pending invitations — owner/admin only',
+  })
+  @UseGuards(JwtAuthGuard, TenantGuard, RolesGuard)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN)
   listMembers(@Param('tenantId') tenantId: string) {
     return this.teamService.listMembers(tenantId);
   }

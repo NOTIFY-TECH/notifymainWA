@@ -18,10 +18,12 @@ export class ListConversationsDto {
   @Max(100)
   limit?: number = 30;
 
-  @ApiPropertyOptional({ enum: ['OPEN', 'ASSIGNED', 'RESOLVED', 'SNOOZED'] })
+  @ApiPropertyOptional({
+    enum: ['OPEN', 'ASSIGNED', 'RESOLVED', 'SNOOZED', 'ARCHIVED'],
+  })
   @IsOptional()
   @IsString()
-  @IsIn(['OPEN', 'ASSIGNED', 'RESOLVED', 'SNOOZED'])
+  @IsIn(['OPEN', 'ASSIGNED', 'RESOLVED', 'SNOOZED', 'ARCHIVED'])
   status?: string;
 
   @ApiPropertyOptional()

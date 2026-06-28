@@ -6,12 +6,16 @@ import { useAuthStore } from '@/store/authStore';
 import { useUIStore } from '@/store/uiStore';
 import Sidebar from '@/components/layout/Sidebar';
 import TopBar from '@/components/layout/TopBar';
+import { useNotifications } from '@/hooks/useNotifications';
 import { cn } from '@/lib/utils';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { isAuthenticated, rehydrated } = useAuthStore();
   const { sidebarOpen } = useUIStore();
+
+  // Browser notifications — requests permission once, then fires on WS events
+  useNotifications();
 
   useEffect(() => {
     if (!rehydrated) return; // wait for AuthRehydrator to finish

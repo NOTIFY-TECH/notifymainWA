@@ -13,7 +13,7 @@ import {
   CampaignRecipientRow,
   ImportRecipientsResult,
 } from './dto/import-recipients.dto';
-import { Prisma } from '@prisma/client';
+import { Prisma, AuditAction } from '@prisma/client';
 import { parse } from 'csv-parse/sync';
 import {
   computeCampaignProgress,
@@ -21,6 +21,7 @@ import {
 } from './utils/campaign-progress.util';
 import { AddCampaignContactsDto } from './dto/add-campaign-contacts.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
+import { AuditLogService } from '../audit-log/audit-log.service';
 
 @Injectable()
 export class CampaignsService {
@@ -28,6 +29,7 @@ export class CampaignsService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly auditLog: AuditLogService,
     @InjectQueue('campaign-queue') private readonly campaignQueue: Queue,
   ) {}
 
@@ -44,11 +46,6 @@ export class CampaignsService {
   }
 
   // ─── Shared: resolve contactIds + tags into a deduped recipient list ────
-  //
-  // Used by createCampaign (fresh campaign, zero existing contacts) and
-  // addContactsToCampaign (existing campaign, may already have contacts —
-  // that caller still needs skipDuplicates on insert against the existing
-  // rows; this method only de-dupes within the newly-resolved set itself).
 
   private async resolveRecipients(
     tenantId: string,
@@ -260,6 +257,20 @@ export class CampaignsService {
       await this.campaignQueue.add('process-campaign', jobData, { delay });
     }
 
+    // ── Audit log: CAMPAIGN_START ─────────────────────────────────────────
+    this.auditLog.log({
+      tenantId,
+      userId,
+      action: AuditAction.CAMPAIGN_START,
+      entityType: 'Campaign',
+      entityId: campaign.id,
+      after: {
+        name: campaign.name,
+        status: campaign.status,
+        totalContacts: contacts.length,
+      },
+    });
+
     this.logger.log(
       `Campaign created: ${campaign.id} (${campaign.status}), ${contacts.length} contacts`,
     );
@@ -268,10 +279,6 @@ export class CampaignsService {
   }
 
   // ─── Update (edit) a draft/scheduled campaign ────────────────────────────
-  //
-  // Same status gate as addContactsToCampaign — once a campaign is RUNNING
-  // or beyond, its content is locked. sessionId is editable (validated
-  // against tenant ownership, same check as createCampaign).
 
   async updateCampaign(
     tenantId: string,
@@ -301,10 +308,6 @@ export class CampaignsService {
       }
     }
 
-    // scheduledAt: string | null | undefined
-    //   undefined → not provided, leave untouched
-    //   null      → explicitly clear the schedule
-    //   string    → set to the given ISO date
     const scheduledAtUpdate =
       dto.scheduledAt === undefined
         ? undefined
@@ -312,9 +315,6 @@ export class CampaignsService {
           ? null
           : new Date(dto.scheduledAt);
 
-    // If clearing the schedule on a SCHEDULED campaign, drop it back to DRAFT
-    // so it doesn't sit in limbo (SCHEDULED with no scheduledAt would be
-    // meaningless and confusing in the UI).
     const statusUpdate =
       campaign.status === 'SCHEDULED' && dto.scheduledAt === null
         ? 'DRAFT'
@@ -340,20 +340,8 @@ export class CampaignsService {
   }
 
   // ─── Launch a draft campaign ──────────────────────────────────────────────
-  //
-  // The missing piece that let createCampaign be the ONLY path that ever
-  // enqueued a BullMQ job. Drafts created via clone (or any future "create
-  // empty, add recipients later" flow) had no way to actually start sending.
-  //
-  // Mirrors createCampaign's isImmediate logic exactly:
-  //   no scheduledAt        → status RUNNING, startedAt now, enqueue with no delay
-  //   scheduledAt in future → status SCHEDULED, enqueue with a delay
-  //
-  // Requires totalContacts > 0 — launching an empty campaign would just
-  // immediately flip to COMPLETED with nothing sent, which is more
-  // confusing than just blocking it outright.
 
-  async launchCampaign(tenantId: string, campaignId: string) {
+  async launchCampaign(tenantId: string, campaignId: string, userId: string) {
     const campaign = await this.findCampaignOrThrow(tenantId, campaignId);
 
     if (!['DRAFT', 'SCHEDULED'].includes(campaign.status)) {
@@ -394,6 +382,20 @@ export class CampaignsService {
       const delay = Math.max(campaign.scheduledAt.getTime() - Date.now(), 0);
       await this.campaignQueue.add('process-campaign', jobData, { delay });
     }
+
+    // ── Audit log: CAMPAIGN_START ─────────────────────────────────────────
+    this.auditLog.log({
+      tenantId,
+      userId,
+      action: AuditAction.CAMPAIGN_START,
+      entityType: 'Campaign',
+      entityId: campaignId,
+      after: {
+        name: campaign.name,
+        status: updated.status,
+        totalContacts: campaign.totalContacts,
+      },
+    });
 
     this.logger.log(
       `Campaign ${campaignId} launched (${updated.status}), ${campaign.totalContacts} contacts`,
@@ -489,7 +491,7 @@ export class CampaignsService {
 
   // ─── Cancel campaign ──────────────────────────────────────────────────────
 
-  async cancelCampaign(tenantId: string, campaignId: string) {
+  async cancelCampaign(tenantId: string, campaignId: string, userId: string) {
     const campaign = await this.findCampaignOrThrow(tenantId, campaignId);
 
     if (!['RUNNING', 'SCHEDULED'].includes(campaign.status)) {
@@ -503,23 +505,22 @@ export class CampaignsService {
       data: { status: 'CANCELLED' },
     });
 
+    // ── Audit log: CAMPAIGN_STOP ──────────────────────────────────────────
+    this.auditLog.log({
+      tenantId,
+      userId,
+      action: AuditAction.CAMPAIGN_STOP,
+      entityType: 'Campaign',
+      entityId: campaignId,
+      before: { name: campaign.name, status: campaign.status },
+      after: { status: 'CANCELLED' },
+    });
+
     this.logger.log(`Campaign cancelled: ${campaignId}`);
     return { data: updated };
   }
 
   // ─── Retry failed recipients ─────────────────────────────────────────────
-  //
-  // Re-queues only CampaignContact rows currently FAILED for this campaign:
-  // resets them to PENDING (clearing failedAt/errorMessage, bumping
-  // retryCount), then adds a fresh process-campaign job. The processor only
-  // ever picks up rows with status: PENDING, so already-SENT/DELIVERED/READ
-  // contacts are untouched — this is a fan-out of failures only, not a full
-  // re-run of the campaign.
-  //
-  // Restricted to COMPLETED campaigns: retrying mid-RUNNING is meaningless
-  // (the processor is already working through PENDING rows), and
-  // DRAFT/SCHEDULED campaigns haven't been attempted yet, so there's nothing
-  // to retry. If you need retry-from-CANCELLED too, loosen this check.
 
   async retryFailedCampaign(tenantId: string, campaignId: string) {
     const campaign = await this.findCampaignOrThrow(tenantId, campaignId);
@@ -570,13 +571,6 @@ export class CampaignsService {
   }
 
   // ─── Clone campaign as new draft ─────────────────────────────────────────
-  //
-  // Copies name, messageTemplate, mediaUrl, sessionId into a fresh DRAFT
-  // campaign with zero contacts attached. createdById is set to whoever
-  // performs the clone (not copied from the original), matching normal
-  // audit-trail expectations. scheduledAt is intentionally NOT copied — a
-  // clone starts as a plain unscheduled draft; the user sets a new schedule
-  // (if any) via updateCampaign before launching.
 
   async cloneCampaign(tenantId: string, campaignId: string, userId: string) {
     const original = await this.findCampaignOrThrow(tenantId, campaignId);
@@ -603,14 +597,6 @@ export class CampaignsService {
   }
 
   // ─── Add recipients to an existing campaign ──────────────────────────────
-  //
-  // Unlike createCampaign (building rows for a campaign with zero existing
-  // contacts), this campaign may already have CampaignContact rows — so the
-  // insert must use skipDuplicates against the (campaignId, phoneNumber)
-  // unique constraint, and totalContacts increments by the actual inserted
-  // count, not the requested count. Mirrors the pattern already used in
-  // importCampaignRecipients (the CSV path) for consistency. CSV-based
-  // additions still go through that separate endpoint — not duplicated here.
 
   async addContactsToCampaign(
     tenantId: string,

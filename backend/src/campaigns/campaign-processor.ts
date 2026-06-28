@@ -26,6 +26,61 @@ function extractUrlFromText(text: string | null | undefined): string | null {
   return match ? match[0] : null;
 }
 
+// ─── Anti-spam pacing helpers ──────────────────────────────────────────────────
+//
+// WhatsApp's spam detection looks for burst patterns — messages sent at a
+// perfectly uniform cadence are a red flag. These helpers introduce:
+//
+//   1. Per-message jitter:  ±40% random variance on the base delay so no two
+//      consecutive gaps are identical.
+//   2. Rest pauses:         After every REST_EVERY messages, a longer pause
+//      (REST_MIN_MS … REST_MAX_MS) simulates a human stepping away briefly.
+//   3. Hard floor:          Never below MIN_DELAY_MS regardless of rateLimitPerMin,
+//      since even "30 msg/min" campaigns shouldn't fire sub-second bursts.
+//
+// At the default 30 msg/min (base = 2 000 ms):
+//   • Per-message range  : 1 200 – 2 800 ms
+//   • Rest pause range   : 8 000 – 15 000 ms every 20 messages
+//   • Follow-up links    : 1 500 – 3 000 ms each (was hardcoded 500 ms)
+
+const JITTER_FACTOR = 0.4; // ±40 % of base delay
+const MIN_DELAY_MS = 1_500; // absolute floor between any two messages
+const REST_EVERY = 20; // take a rest pause after every N messages
+const REST_MIN_MS = 8_000;
+const REST_MAX_MS = 15_000;
+
+/** Returns a random integer in [min, max]. */
+function randInt(min: number, max: number): number {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+/**
+ * Jittered delay between main messages.
+ * base ± (base × JITTER_FACTOR), floored at MIN_DELAY_MS.
+ */
+function jitteredDelay(baseMs: number): number {
+  const jitter = Math.floor(baseMs * JITTER_FACTOR);
+  const raw = baseMs + randInt(-jitter, jitter);
+  return Math.max(raw, MIN_DELAY_MS);
+}
+
+/**
+ * Random rest pause between REST_MIN_MS and REST_MAX_MS.
+ * Called every REST_EVERY messages to simulate a natural break.
+ */
+function restPause(): Promise<void> {
+  return new Promise((r) => setTimeout(r, randInt(REST_MIN_MS, REST_MAX_MS)));
+}
+
+/**
+ * Random delay before sending a follow-up link card.
+ * 1 500 – 3 000 ms. Distinct from main-message jitter so the two
+ * messages don't arrive as an instant pair.
+ */
+function followUpDelay(): Promise<void> {
+  return new Promise((r) => setTimeout(r, randInt(1_500, 3_000)));
+}
+
 @Processor('campaign-queue')
 export class CampaignProcessor extends WorkerHost {
   private readonly logger = new Logger(CampaignProcessor.name);
@@ -92,7 +147,7 @@ export class CampaignProcessor extends WorkerHost {
     });
 
     const apiKey = this.config.get<string>('OPENWA_API_KEY');
-    const delayMs = Math.floor(60000 / (campaign.rateLimitPerMin || 30));
+    const baseDelayMs = Math.floor(60_000 / (campaign.rateLimitPerMin || 30));
     const messageType = resolveMessageType(
       campaign.mediaUrl,
       campaign.mediaType,
@@ -113,11 +168,6 @@ export class CampaignProcessor extends WorkerHost {
     // Both are sent if both are present (up to 3 total messages per contact).
     // They are only sent when the main message has media — text-only campaigns
     // with a URL in the body do not trigger the split behaviour.
-    //
-    // Note: captionUrl / followUpUrls are derived from the raw messageTemplate
-    // (before {{name}} substitution) because link URLs should not contain
-    // {{name}} tokens. If they somehow do, interpolation happens per-contact
-    // below on outboundText; the link URL itself is sent verbatim.
 
     const hasMedia = !!campaign.mediaUrl && !isLinkOnly;
     const captionUrl = hasMedia
@@ -127,7 +177,7 @@ export class CampaignProcessor extends WorkerHost {
       hasMedia && campaign.linkUrl ? campaign.linkUrl : null;
 
     // Deduplicate: if the explicit link is the same URL already in the caption,
-    // only send it once (as the caption-extracted one).
+    // only send it once.
     const followUpUrls: string[] = [];
     if (captionUrl) followUpUrls.push(captionUrl);
     if (explicitLinkUrl && explicitLinkUrl !== captionUrl) {
@@ -168,6 +218,13 @@ export class CampaignProcessor extends WorkerHost {
       }
     }
 
+    // ── Main send loop ────────────────────────────────────────────────────────
+    // messagesSentThisBatch tracks progress for rest-pause triggering.
+    // It increments on every attempt (success or failure) so pauses are
+    // evenly spaced regardless of delivery outcome.
+
+    let messagesSentThisBatch = 0;
+
     for (const contact of pendingContacts) {
       const current = await this.prisma.campaign.findUnique({
         where: { id: campaignId },
@@ -179,9 +236,6 @@ export class CampaignProcessor extends WorkerHost {
       }
 
       // ── Per-contact {{name}} interpolation (17.4) ─────────────────────────
-      // Resolve this recipient's display name then substitute {{name}} in the
-      // message template. Each recipient gets their own personalised copy.
-      // Falls back: whatsappName → CRM name → phone number (never blank).
       const displayName = resolveDisplayName(
         contact.contact,
         contact.phoneNumber,
@@ -193,12 +247,68 @@ export class CampaignProcessor extends WorkerHost {
 
       const outboundText = interpolateMessage(baseText, displayName);
 
-      // ── Main message (media + caption, or plain text) ─────────────────────
+      // ── Find-or-create Conversation for this recipient ────────────────────
+      const sessionId = campaign.sessionId;
+
+      const keeperExists = await this.prisma.conversation.findFirst({
+        where: { tenantId, sessionId, phoneNumber: contact.phoneNumber },
+        select: { id: true },
+      });
+
+      if (!keeperExists) {
+        await this.prisma.conversation.updateMany({
+          where: {
+            tenantId,
+            phoneNumber: contact.phoneNumber,
+            sessionId: null,
+          },
+          data: { sessionId },
+        });
+      } else {
+        await this.prisma.conversation.deleteMany({
+          where: {
+            tenantId,
+            phoneNumber: contact.phoneNumber,
+            sessionId: null,
+          },
+        });
+      }
+
+      const conversation = await this.prisma.conversation.upsert({
+        where: {
+          tenantId_sessionId_phoneNumber: {
+            tenantId,
+            sessionId,
+            phoneNumber: contact.phoneNumber,
+          },
+        },
+        create: {
+          tenantId,
+          sessionId,
+          phoneNumber: contact.phoneNumber,
+          contactId: contact.contactId ?? null,
+          contactName: displayName ?? null,
+          status: 'OPEN',
+          unreadCount: 0,
+          lastMessageAt: new Date(),
+          lastMessageText: outboundText.slice(0, 500),
+        },
+        update: {
+          lastMessageAt: new Date(),
+          lastMessageText: outboundText.slice(0, 500),
+          ...(contact.contactId ? { contactId: contact.contactId } : {}),
+        },
+      });
+
+      const conversationId = conversation.id;
+
+      // ── Main message ──────────────────────────────────────────────────────
 
       const message = await this.prisma.message.create({
         data: {
           tenantId,
           sessionId: campaign.sessionId,
+          conversationId,
           campaignId: campaign.id,
           direction: 'OUTBOUND',
           type: messageType as any,
@@ -240,21 +350,32 @@ export class CampaignProcessor extends WorkerHost {
           data: { status: 'SENT', sentAt: new Date(), messageId: message.id },
         });
 
-        // ── Follow-up link messages ─────────────────────────────────────────
-        // Only sent if the main message succeeded. Each URL is sent as a
-        // separate plain-text message so WhatsApp unfurls it as a card.
-        // These are fire-and-forget — a failure here does NOT flip the
-        // CampaignContact to FAILED (the main send already succeeded).
+        // ── Emit to inbox in real time ────────────────────────────────────
+        this.gatewayService.emitMessageReceived(tenantId, {
+          messageId: message.id,
+          conversationId,
+          sessionId: campaign.session.openwaId,
+          from: contact.phoneNumber,
+          body: outboundText,
+          type: messageType,
+          mediaUrl: campaign.mediaUrl ?? null,
+          mediaType: campaign.mediaType ?? null,
+          createdAt: new Date(),
+        });
+
+        // ── Follow-up link messages ───────────────────────────────────────
+        // Fire-and-forget — failure here does NOT flip CampaignContact to
+        // FAILED. Randomised delay (1.5–3 s) between follow-ups.
 
         for (const linkUrl of followUpUrls) {
           try {
-            // Small delay between messages to avoid flooding
-            await new Promise((r) => setTimeout(r, 500));
+            await followUpDelay();
 
             const linkMessage = await this.prisma.message.create({
               data: {
                 tenantId,
                 sessionId: campaign.sessionId,
+                conversationId,
                 campaignId: campaign.id,
                 direction: 'OUTBOUND',
                 type: 'TEXT',
@@ -295,7 +416,6 @@ export class CampaignProcessor extends WorkerHost {
               `Campaign ${campaignId}: sent link card to ${contact.phoneNumber}: ${linkUrl}`,
             );
           } catch (linkErr) {
-            // Log but do not fail the contact — main message already went through
             this.logger.warn(
               `Campaign ${campaignId}: failed to send link card to ${contact.phoneNumber} (${linkUrl}): ${linkErr instanceof Error ? linkErr.message : String(linkErr)}`,
             );
@@ -332,7 +452,26 @@ export class CampaignProcessor extends WorkerHost {
         );
       }
 
-      await new Promise((r) => setTimeout(r, delayMs));
+      // ── Anti-spam pacing ──────────────────────────────────────────────────
+      // 1. Jittered inter-message delay (replaces fixed delayMs).
+      // 2. Occasional longer rest pause every REST_EVERY messages.
+      //
+      // The rest pause fires BEFORE the jittered delay so the gap between
+      // the last message of a batch and the first of the next is:
+      //   rest (8–15 s) + jitter (base ± 40 %)
+      // which is noticeably longer than the mid-batch gaps — a natural
+      // human rhythm.
+
+      messagesSentThisBatch++;
+
+      if (messagesSentThisBatch % REST_EVERY === 0) {
+        this.logger.debug(
+          `Campaign ${campaignId}: rest pause after ${messagesSentThisBatch} messages`,
+        );
+        await restPause();
+      }
+
+      await new Promise((r) => setTimeout(r, jitteredDelay(baseDelayMs)));
     }
 
     const finalCampaign = await this.prisma.campaign.findUnique({
@@ -390,5 +529,5 @@ function resolveMessageType(
   if (mediaType.startsWith('video/')) return 'VIDEO';
   if (mediaType.startsWith('audio/')) return 'AUDIO';
   if (mediaType === 'application/pdf') return 'DOCUMENT';
-  return 'IMAGE'; // unknown media — best guess
+  return 'IMAGE';
 }

@@ -6,12 +6,14 @@ import { CampaignsService } from './campaigns.service';
 import { CampaignProcessor } from './campaign-processor';
 import { GatewayModule } from '../gateway/gateway.module';
 import { EngineRegistryModule } from '../engine-registry/engine-registry.module';
+import { AuditLogModule } from '../audit-log/audit-log.module';
 
 @Module({
   imports: [
     ConfigModule,
     GatewayModule,
     EngineRegistryModule,
+    AuditLogModule,
     BullModule.registerQueue({ name: 'campaign-queue' }),
   ],
   controllers: [CampaignsController],

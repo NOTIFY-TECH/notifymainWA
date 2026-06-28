@@ -1,13 +1,16 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useAuditLog } from '@/hooks/useAuditLog';
+import { useAuthStore } from '@/store/authStore';
 import { AuditAction, AuditLogEntry } from '@/types/audit-log';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Shield, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { useEffect } from 'react';
 
 const ACTION_LABELS: Record<AuditAction, string> = {
   CREATE: 'Created',
@@ -41,10 +44,37 @@ const ACTION_COLORS: Record<AuditAction, string> = {
   API_KEY_REVOKE: 'text-red-400 bg-red-500/10',
 };
 
+// Actions shown in the filter dropdown.
+// API_KEY_CREATE and API_KEY_REVOKE are intentionally excluded for all roles —
+// they are logged internally but not surfaced as a filterable action.
+const DROPDOWN_ACTIONS: AuditAction[] = [
+  'CREATE',
+  'READ',
+  'UPDATE',
+  'DELETE',
+  'DOWNLOAD',
+  'LOGIN',
+  'LOGOUT',
+  'SESSION_CONNECT',
+  'SESSION_DISCONNECT',
+  'CAMPAIGN_START',
+  'CAMPAIGN_STOP',
+];
+
 const LIMIT = 25;
-const ALL_ACTIONS = Object.keys(ACTION_LABELS) as AuditAction[];
 
 export default function AuditLogPage() {
+  const role = useAuthStore(s => s.user?.role);
+  const router = useRouter();
+
+  // Redirect AGENTs away — belt-and-suspenders on top of the layout tab hide
+  // and the backend @Roles guard.
+  useEffect(() => {
+    if (role === 'AGENT') {
+      router.replace('/dashboard/settings');
+    }
+  }, [role, router]);
+
   const [page, setPage] = useState(1);
   const [action, setAction] = useState<AuditAction | ''>('');
   const [from, setFrom] = useState('');
@@ -63,6 +93,8 @@ export default function AuditLogPage() {
   const meta = data?.meta;
 
   const handleFilterChange = () => setPage(1);
+
+  if (role === 'AGENT') return null;
 
   return (
     <div className="space-y-5">
@@ -91,7 +123,7 @@ export default function AuditLogPage() {
             className="w-full h-9 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--muted))] px-3 text-xs text-[hsl(var(--foreground))] focus:outline-none focus:ring-1 focus:ring-[hsl(var(--green))]"
           >
             <option value="">All actions</option>
-            {ALL_ACTIONS.map(a => (
+            {DROPDOWN_ACTIONS.map(a => (
               <option key={a} value={a}>
                 {ACTION_LABELS[a]}
               </option>

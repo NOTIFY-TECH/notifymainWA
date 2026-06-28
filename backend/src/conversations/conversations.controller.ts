@@ -2,8 +2,10 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Param,
   Query,
+  Body,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -11,6 +13,7 @@ import {
 import { ApiTags, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { ConversationsService } from './conversations.service';
 import { ListConversationsDto } from './dto/list-conversations.dto';
+import { AssignConversationDto } from './dto/assign-conversation.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { TenantGuard } from '../common/guards/tenant.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -87,5 +90,78 @@ export class ConversationsController {
     @Param('conversationId') conversationId: string,
   ) {
     return this.conversationsService.markAsRead(tenantId, conversationId);
+  }
+
+  // PATCH /tenants/:tenantId/conversations/:conversationId/pin
+  @Patch(':conversationId/pin')
+  @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
+  async pinConversation(
+    @Param('tenantId') tenantId: string,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.conversationsService.pinConversation(tenantId, conversationId);
+  }
+
+  // PATCH /tenants/:tenantId/conversations/:conversationId/unpin
+  @Patch(':conversationId/unpin')
+  @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
+  async unpinConversation(
+    @Param('tenantId') tenantId: string,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.conversationsService.unpinConversation(
+      tenantId,
+      conversationId,
+    );
+  }
+
+  // PATCH /tenants/:tenantId/conversations/:conversationId/archive
+  @Patch(':conversationId/archive')
+  @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
+  async archiveConversation(
+    @Param('tenantId') tenantId: string,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.conversationsService.archiveConversation(
+      tenantId,
+      conversationId,
+    );
+  }
+
+  // PATCH /tenants/:tenantId/conversations/:conversationId/unarchive
+  @Patch(':conversationId/unarchive')
+  @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
+  async unarchiveConversation(
+    @Param('tenantId') tenantId: string,
+    @Param('conversationId') conversationId: string,
+  ) {
+    return this.conversationsService.unarchiveConversation(
+      tenantId,
+      conversationId,
+    );
+  }
+
+  // PATCH /tenants/:tenantId/conversations/:conversationId/assign
+  // Session 27: new endpoint backing the Inbox — assign conversations matrix
+  // row. Owner/Admin only, per the matrix — Agents can be assignees but
+  // cannot perform the assignment themselves.
+  // Body: { userId: string | null } — null/omitted unassigns.
+  @Patch(':conversationId/assign')
+  @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN)
+  async assignConversation(
+    @Param('tenantId') tenantId: string,
+    @Param('conversationId') conversationId: string,
+    @Body() dto: AssignConversationDto,
+  ) {
+    return this.conversationsService.assignConversation(
+      tenantId,
+      conversationId,
+      dto,
+    );
   }
 }

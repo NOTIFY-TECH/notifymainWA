@@ -64,8 +64,18 @@ export class MessagesService {
     //   - bare digits with no "@" at all (CSV imports, campaigns, manual
     //     contact entry) -- these ARE real phone numbers and get normalised.
     let addressToSend: string;
+    let normalisedPhoneDigits: string | null = null; // bare digits, no JID suffix — used for Conversation.phoneNumber + Contact lookup
     if (typeof dto.to === 'string' && dto.to.includes('@')) {
       addressToSend = dto.to;
+      if (!addressToSend.endsWith('@lid')) {
+        // @s.whatsapp.net — phone digits live before the @
+        const digits = addressToSend.split('@')[0];
+        const normalised = normalisePhone(digits);
+        normalisedPhoneDigits = normalised.valid
+          ? normalised.normalised
+          : digits;
+      }
+      // @lid — no phone digits available; left null, handled below
     } else {
       const normaliseResult = normalisePhone(dto.to);
       if (!normaliseResult.valid) {
@@ -74,6 +84,7 @@ export class MessagesService {
         );
       }
       addressToSend = normaliseResult.normalised;
+      normalisedPhoneDigits = normaliseResult.normalised;
     }
     this.logger.debug(
       `dto.to raw: "${dto.to}" -> addressToSend: "${addressToSend}"`,
@@ -101,6 +112,7 @@ export class MessagesService {
     // inbound message, so the sender's WhatsApp display name is always
     // available for interpolation regardless of whether a Contact row exists.
     let recipientContact: {
+      id: string;
       whatsappName: string | null;
       name: string | null;
     } | null = null;
@@ -113,7 +125,7 @@ export class MessagesService {
           where: { id: dto.conversationId },
           select: {
             contactName: true,
-            contact: { select: { whatsappName: true, name: true } },
+            contact: { select: { id: true, whatsappName: true, name: true } },
           },
         });
         recipientContact = conv?.contact ?? null;
@@ -135,7 +147,7 @@ export class MessagesService {
               phoneNumber: normalised.normalised,
             },
           },
-          select: { whatsappName: true, name: true },
+          select: { id: true, whatsappName: true, name: true },
         });
       }
     }
@@ -172,12 +184,68 @@ export class MessagesService {
       ? interpolateMessage(dto.text, displayName)
       : dto.text;
 
-    // 6. Log message to DB with status PENDING (using interpolated text as body)
+    // 6. Find-or-create the Conversation this message belongs to.
+    //
+    // Previously, brand-new outbound conversations (e.g. "New Conversation"
+    // from the inbox, with no dto.conversationId yet) never created or
+    // touched a Conversation row at all — only a Message row with
+    // conversationId: null was written. This meant the conversation never
+    // appeared in the inbox list until an inbound webhook happened to create
+    // one later, which is also why the frontend's list-refetch after sending
+    // looked like a "doesn't refresh" bug — there was nothing to refetch.
+    //
+    // Resolution:
+    //   - If dto.conversationId was passed (replying inside an existing
+    //     thread), use it as-is.
+    //   - Otherwise, upsert on the Conversation unique constraint
+    //     (tenantId, sessionId, phoneNumber) — this transparently reuses an
+    //     existing conversation if one already exists for this contact on
+    //     this session (e.g. they messaged in before), or creates a fresh
+    //     one if not.
+    //
+    // @lid addresses have no phone number to key off of; in that rare case
+    // (starting a brand-new outbound message to a contact only known by LID,
+    // with no prior inbound message and no conversationId) we fall back to
+    // the LID digits as the phoneNumber key, consistent with how addresses
+    // are stored elsewhere in this method.
+    let conversationId: string | null = dto.conversationId ?? null;
+
+    if (!conversationId) {
+      const conversationPhoneKey =
+        normalisedPhoneDigits ?? addressToSend.split('@')[0];
+
+      const conversation = await this.prisma.conversation.upsert({
+        where: {
+          tenantId_sessionId_phoneNumber: {
+            tenantId,
+            sessionId: session.id,
+            phoneNumber: conversationPhoneKey,
+          },
+        },
+        update: {
+          lastMessageAt: new Date(),
+          lastMessageText: interpolatedText ?? null,
+        },
+        create: {
+          tenantId,
+          sessionId: session.id,
+          contactId: recipientContact?.id ?? null,
+          contactName: displayName ?? null,
+          phoneNumber: conversationPhoneKey,
+          status: 'OPEN',
+          lastMessageAt: new Date(),
+          lastMessageText: interpolatedText ?? null,
+        },
+      });
+      conversationId = conversation.id;
+    }
+
+    // 7. Log message to DB with status PENDING (using interpolated text as body)
     const message = await this.prisma.message.create({
       data: {
         tenantId,
         sessionId: session.id,
-        conversationId: dto.conversationId ?? null,
+        conversationId,
         direction: 'OUTBOUND',
         fromNumber: session.phoneNumber ?? '',
         toNumber: dto.to,
@@ -190,7 +258,7 @@ export class MessagesService {
       },
     });
 
-    // 7. Forward to engine
+    // 8. Forward to engine
     try {
       this.logger.debug(`Sending with API key: ${JSON.stringify(apiKey)}`);
       const response = await axios.post(
@@ -207,7 +275,7 @@ export class MessagesService {
         { headers: { 'X-API-Key': apiKey } },
       );
 
-      // 8. Update status to SENT
+      // 9. Update status to SENT
       await this.prisma.message.update({
         where: { id: message.id },
         data: {
@@ -231,6 +299,7 @@ export class MessagesService {
       return {
         ...message,
         status: 'SENT',
+        conversationId,
         externalId:
           typeof response.data?.messageId === 'string'
             ? response.data.messageId
@@ -242,7 +311,7 @@ export class MessagesService {
           `Engine response: ${JSON.stringify(error.response?.data)}`,
         );
       }
-      // 9. Mark as FAILED if engine call fails
+      // 10. Mark as FAILED if engine call fails
       await this.prisma.message.update({
         where: { id: message.id },
         data: { status: 'FAILED', failedAt: new Date() },
@@ -316,6 +385,103 @@ export class MessagesService {
       data: { status: status as any, ...timestamps },
     });
     this.logger.log(`Message ${externalId} status updated to ${status}`);
+  }
+
+  async reactToMessage(tenantId: string, messageId: string, emoji: string) {
+    // Use include (not select) so that conversation + session relations are
+    // available as typed objects, not just scalar IDs.
+    const message = await this.prisma.message.findFirst({
+      where: { id: messageId, tenantId },
+      include: {
+        conversation: {
+          select: {
+            sessionId: true,
+            phoneNumber: true,
+            session: {
+              select: {
+                openwaId: true,
+                status: true,
+                phoneNumber: true,
+                engineInstanceId: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!message) {
+      throw new NotFoundException(`Message ${messageId} not found`);
+    }
+
+    const session = message.conversation?.session;
+    if (!session || session.status !== 'CONNECTED') {
+      throw new BadRequestException('Session is not connected');
+    }
+
+    if (!session.phoneNumber) {
+      throw new BadRequestException('Session has no phone number on record');
+    }
+
+    const senderJid = `${session.phoneNumber}@s.whatsapp.net`;
+
+    if (!message.externalId) {
+      throw new BadRequestException(
+        'Cannot react to a message without an externalId (not yet synced by WhatsApp)',
+      );
+    }
+
+    // Send reaction to engine
+    const apiKey = this.config.get<string>('OPENWA_API_KEY');
+    const engine = await this.resolveEngine(
+      message.conversation.sessionId,
+      session.engineInstanceId ?? null,
+    );
+
+    try {
+      await axios.post(
+        `${engine.url}/api/messages/react`,
+        {
+          sessionId: session.openwaId,
+          targetExternalId: message.externalId,
+          to: message.conversation.phoneNumber,
+          emoji,
+          fromMe: message.direction === 'OUTBOUND',
+        },
+        { headers: { 'X-API-Key': apiKey } },
+      );
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        this.logger.error(
+          `Engine reaction response: ${JSON.stringify(error.response?.data)}`,
+        );
+      }
+      throw new BadRequestException('Failed to send reaction via engine');
+    }
+
+    // Upsert reactions JSON locally (same logic as webhooks.processor)
+    const current: Record<string, string[]> =
+      (message.reactions as Record<string, string[]>) ?? {};
+
+    const cleaned: Record<string, string[]> = {};
+    for (const [e, senders] of Object.entries(current)) {
+      const filtered = senders.filter((j) => j !== senderJid);
+      if (filtered.length > 0) cleaned[e] = filtered;
+    }
+    if (emoji && emoji.trim()) {
+      cleaned[emoji] = [...(cleaned[emoji] ?? []), senderJid];
+    }
+
+    await this.prisma.message.update({
+      where: { id: message.id },
+      data: { reactions: cleaned },
+    });
+
+    this.logger.log(
+      `Reaction ${emoji || '(removed)'} on message ${messageId} by ${senderJid}`,
+    );
+
+    return { data: { success: true, reactions: cleaned } };
   }
 
   private async resolveEngine(
