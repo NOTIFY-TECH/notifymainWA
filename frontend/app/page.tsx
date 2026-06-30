@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { motion, useScroll, useTransform, AnimatePresence, type Variants } from 'framer-motion';
+import { motion, useScroll, useTransform, type Variants } from 'framer-motion';
 import { useRef, useEffect, useState } from 'react';
 import {
   Zap,
@@ -14,18 +14,7 @@ import {
   CheckCircle2,
   ChevronDown,
 } from 'lucide-react';
-
-// ─── Design tokens (mirror globals.css values) ────────────────────────────────
-
-const C = {
-  bg: 'hsl(215 28% 7%)',
-  card: 'hsl(215 28% 11%)',
-  border: 'hsl(215 28% 16%)',
-  muted: 'hsl(215 16% 47%)',
-  fg: 'hsl(213 31% 91%)',
-  green: 'hsl(134 61% 41%)',
-  purple: 'hsl(263 70% 56%)',
-};
+import ThemeToggle from '@/components/common/ThemeToggle';
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 
@@ -119,41 +108,30 @@ const fadeUp: Variants = {
   }),
 };
 
-const fadeIn: Variants = {
-  hidden: { opacity: 0 },
-  visible: { opacity: 1, transition: { duration: 0.5 } },
-};
-
 // ─── Components ───────────────────────────────────────────────────────────────
 
 function GlowOrb({
   x,
   y,
-  color,
+  variant = 'green',
   size = 480,
-  opacity = 0.18,
 }: {
   x: string;
   y: string;
-  color: string;
+  variant?: 'green' | 'purple';
   size?: number;
-  opacity?: number;
 }) {
+  const colorClass = variant === 'green' ? 'bg-[hsl(var(--green))]' : 'bg-[hsl(var(--purple))]';
   return (
     <div
       aria-hidden="true"
+      className={`absolute rounded-full pointer-events-none -translate-x-1/2 -translate-y-1/2 opacity-[0.10] dark:opacity-[0.14] ${colorClass}`}
       style={{
-        position: 'absolute',
         left: x,
         top: y,
         width: size,
         height: size,
-        borderRadius: '50%',
-        background: color,
-        opacity,
         filter: `blur(${size * 0.45}px)`,
-        pointerEvents: 'none',
-        transform: 'translate(-50%, -50%)',
       }}
     />
   );
@@ -171,83 +149,42 @@ function FeatureCard({ feature, index }: { feature: (typeof FEATURES)[0]; index:
       whileInView="visible"
       viewport={{ once: true, margin: '-60px' }}
       whileHover={{ y: -4, transition: { duration: 0.2 } }}
-      style={{
-        padding: '28px 28px 32px',
-        borderRadius: 20,
-        border: `1px solid ${C.border}`,
-        backgroundColor: C.card,
-        position: 'relative',
-        overflow: 'hidden',
-        cursor: 'default',
-      }}
+      className="relative overflow-hidden rounded-[20px] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-7 pb-8 shadow-[var(--shadow-sm)]"
     >
       {/* Subtle top-edge glow */}
       <div
         aria-hidden
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: '20%',
-          right: '20%',
-          height: 1,
-          background: isGreen
-            ? 'linear-gradient(90deg, transparent, hsl(134 61% 41% / 0.6), transparent)'
-            : 'linear-gradient(90deg, transparent, hsl(263 70% 56% / 0.6), transparent)',
-        }}
+        className={`absolute top-0 left-[20%] right-[20%] h-px ${
+          isGreen
+            ? 'bg-gradient-to-r from-transparent via-[hsl(var(--green)/0.6)] to-transparent'
+            : 'bg-gradient-to-r from-transparent via-[hsl(var(--purple)/0.6)] to-transparent'
+        }`}
       />
 
       {/* Icon */}
       <div
-        style={{
-          width: 44,
-          height: 44,
-          borderRadius: 12,
-          backgroundColor: isGreen ? 'hsl(134 61% 41% / 0.1)' : 'hsl(263 70% 56% / 0.1)',
-          border: `1px solid ${isGreen ? 'hsl(134 61% 41% / 0.2)' : 'hsl(263 70% 56% / 0.2)'}`,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          marginBottom: 20,
-        }}
+        className={`mb-5 flex h-11 w-11 items-center justify-center rounded-xl border ${
+          isGreen
+            ? 'bg-[hsl(var(--green)/0.1)] border-[hsl(var(--green)/0.2)]'
+            : 'bg-[hsl(var(--purple)/0.1)] border-[hsl(var(--purple)/0.2)]'
+        }`}
       >
-        <Icon size={20} color={isGreen ? C.green : C.purple} />
+        <Icon size={20} className={isGreen ? 'text-[hsl(var(--green))]' : 'text-[hsl(var(--purple))]'} />
       </div>
 
-      <h3
-        style={{
-          fontSize: 16,
-          fontWeight: 600,
-          letterSpacing: '-0.015em',
-          marginBottom: 8,
-          color: C.fg,
-        }}
-      >
-        {feature.title}
-      </h3>
-      <p
-        style={{
-          fontSize: 14,
-          lineHeight: 1.7,
-          color: C.muted,
-          marginBottom: 20,
-        }}
-      >
-        {feature.description}
-      </p>
+      <h3 className="mb-2 text-[16px] font-[600] tracking-[-0.015em] text-[hsl(var(--foreground))]">{feature.title}</h3>
+      <p className="mb-5 text-[14px] leading-[1.7] text-[hsl(var(--muted-foreground))]">{feature.description}</p>
 
       {/* Mini stat */}
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+      <div className="flex items-baseline gap-1.5">
         <span
-          style={{
-            fontSize: 22,
-            fontWeight: 700,
-            letterSpacing: '-0.03em',
-            color: isGreen ? C.green : C.purple,
-          }}
+          className={`text-[22px] font-[700] tracking-[-0.03em] ${
+            isGreen ? 'text-[hsl(var(--green))]' : 'text-[hsl(var(--purple))]'
+          }`}
         >
           {feature.stat}
         </span>
-        <span style={{ fontSize: 12, color: C.muted }}>{feature.statLabel}</span>
+        <span className="text-[12px] text-[hsl(var(--muted-foreground))]">{feature.statLabel}</span>
       </div>
     </motion.div>
   );
@@ -261,43 +198,18 @@ function TestimonialCard({ t, index }: { t: (typeof TESTIMONIALS)[0]; index: num
       initial="hidden"
       whileInView="visible"
       viewport={{ once: true, margin: '-40px' }}
-      style={{
-        padding: '28px 28px 32px',
-        borderRadius: 20,
-        border: `1px solid ${C.border}`,
-        backgroundColor: C.card,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 20,
-      }}
+      className="flex flex-col gap-5 rounded-[20px] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-7 pb-8 shadow-[var(--shadow-sm)]"
     >
-      {/* Quote marks */}
-      <div style={{ fontSize: 40, lineHeight: 1, color: C.green, fontFamily: 'Georgia, serif', opacity: 0.5 }}>
-        &ldquo;
-      </div>
-      <p style={{ fontSize: 15, lineHeight: 1.7, color: C.fg, marginTop: -16 }}>{t.quote}</p>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 'auto' }}>
-        <div
-          style={{
-            width: 36,
-            height: 36,
-            borderRadius: '50%',
-            backgroundColor: 'hsl(134 61% 41% / 0.12)',
-            border: '1px solid hsl(134 61% 41% / 0.2)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: 12,
-            fontWeight: 700,
-            color: C.green,
-            flexShrink: 0,
-          }}
-        >
+      {/* Quote mark */}
+      <div className="font-serif text-[40px] leading-none text-[hsl(var(--green)/0.5)]">&ldquo;</div>
+      <p className="-mt-4 text-[15px] leading-[1.7] text-[hsl(var(--foreground))]">{t.quote}</p>
+      <div className="mt-auto flex items-center gap-3">
+        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full border border-[hsl(var(--green)/0.2)] bg-[hsl(var(--green)/0.12)] text-[12px] font-[700] text-[hsl(var(--green))]">
           {t.initials}
         </div>
         <div>
-          <p style={{ fontSize: 13, fontWeight: 600, color: C.fg, marginBottom: 1 }}>{t.name}</p>
-          <p style={{ fontSize: 12, color: C.muted }}>{t.role}</p>
+          <p className="mb-0.5 text-[13px] font-[600] text-[hsl(var(--foreground))]">{t.name}</p>
+          <p className="text-[12px] text-[hsl(var(--muted-foreground))]">{t.role}</p>
         </div>
       </div>
     </motion.div>
@@ -320,96 +232,39 @@ export default function LandingPage() {
   }, []);
 
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        backgroundColor: C.bg,
-        color: C.fg,
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif',
-        WebkitFontSmoothing: 'antialiased',
-        overflowX: 'hidden',
-      }}
-    >
+    <div className="min-h-screen overflow-x-hidden bg-[hsl(var(--background))] text-[hsl(var(--foreground))] antialiased">
       {/* ── Nav ── */}
       <motion.nav
         initial={{ y: -16, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ duration: 0.5, ease: 'easeOut' }}
-        style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          zIndex: 100,
-          borderBottom: navSolid ? `1px solid ${C.border}` : '1px solid transparent',
-          backgroundColor: navSolid ? 'hsl(215 28% 7% / 0.92)' : 'transparent',
-          backdropFilter: navSolid ? 'blur(20px)' : 'none',
-          transition: 'background-color 0.3s, border-color 0.3s, backdrop-filter 0.3s',
-        }}
+        className={`fixed inset-x-0 top-0 z-[100] transition-colors duration-300 ${
+          navSolid
+            ? 'border-b border-[hsl(var(--border))] bg-[hsl(var(--background)/0.92)] backdrop-blur-xl'
+            : 'border-b border-transparent bg-transparent'
+        }`}
       >
-        <div
-          style={{
-            maxWidth: 1140,
-            margin: '0 auto',
-            padding: '0 24px',
-            height: 64,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div
-              style={{
-                width: 34,
-                height: 34,
-                borderRadius: 10,
-                backgroundColor: C.green,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Zap size={17} color="hsl(134 100% 5%)" strokeWidth={2.5} />
+        <div className="mx-auto flex h-16 max-w-[1140px] items-center justify-between px-6">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-[34px] w-[34px] items-center justify-center rounded-[10px] bg-[hsl(var(--green))]">
+              <Zap size={17} className="text-white" strokeWidth={2.5} />
             </div>
-            <span
-              style={{
-                fontWeight: 700,
-                fontSize: 15,
-                letterSpacing: '-0.02em',
-                color: C.fg,
-              }}
-            >
+            <span className="text-[15px] font-[700] tracking-[-0.02em] text-[hsl(var(--foreground))]">
               NotifyTechAI
             </span>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div className="flex items-center gap-1.5">
             <Link
               href="/login"
-              style={{
-                padding: '8px 18px',
-                borderRadius: 10,
-                fontSize: 14,
-                fontWeight: 500,
-                color: C.muted,
-                textDecoration: 'none',
-              }}
+              className="rounded-[10px] px-[18px] py-2 text-[14px] font-[500] text-[hsl(var(--muted-foreground))] no-underline hover:text-[hsl(var(--foreground))]"
             >
               Sign in
             </Link>
+            <ThemeToggle />
             <Link
               href="/register"
-              style={{
-                padding: '8px 20px',
-                borderRadius: 10,
-                fontSize: 14,
-                fontWeight: 600,
-                backgroundColor: C.green,
-                color: 'hsl(134 100% 5%)',
-                textDecoration: 'none',
-                boxShadow: '0 0 20px hsl(134 61% 41% / 0.35)',
-              }}
+              className="rounded-[10px] bg-[hsl(var(--green))] px-5 py-2 text-[14px] font-[600] text-white no-underline shadow-[0_0_20px_hsl(var(--green)/0.35)]"
             >
               Get started
             </Link>
@@ -418,82 +273,41 @@ export default function LandingPage() {
       </motion.nav>
 
       {/* ── Hero ── */}
-      <section
-        ref={heroRef}
-        style={{
-          position: 'relative',
-          minHeight: '100vh',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          overflow: 'hidden',
-          paddingTop: 64,
-        }}
-      >
+      <section ref={heroRef} className="relative flex min-h-screen items-center justify-center overflow-hidden pt-16">
         {/* Background orbs */}
-        <GlowOrb x="20%" y="30%" color={C.green} size={600} opacity={0.12} />
-        <GlowOrb x="80%" y="60%" color={C.purple} size={500} opacity={0.12} />
-        <GlowOrb x="50%" y="80%" color={C.green} size={300} opacity={0.07} />
+        <GlowOrb x="20%" y="30%" variant="green" size={600} />
+        <GlowOrb x="80%" y="60%" variant="purple" size={500} />
+        <GlowOrb x="50%" y="80%" variant="green" size={300} />
 
         {/* Grid overlay */}
         <div
           aria-hidden
+          className="absolute inset-0 opacity-60 dark:opacity-100"
           style={{
-            position: 'absolute',
-            inset: 0,
             backgroundImage: `
-              linear-gradient(hsl(215 28% 20% / 0.15) 1px, transparent 1px),
-              linear-gradient(90deg, hsl(215 28% 20% / 0.15) 1px, transparent 1px)
+              linear-gradient(hsl(var(--border)) 1px, transparent 1px),
+              linear-gradient(90deg, hsl(var(--border)) 1px, transparent 1px)
             `,
             backgroundSize: '48px 48px',
             maskImage: 'radial-gradient(ellipse 80% 60% at 50% 40%, black 30%, transparent 100%)',
+            WebkitMaskImage: 'radial-gradient(ellipse 80% 60% at 50% 40%, black 30%, transparent 100%)',
           }}
         />
 
         <motion.div style={{ opacity: heroOpacity, y: heroY }} transition={{ type: 'spring' }}>
-          <div
-            style={{
-              maxWidth: 860,
-              margin: '0 auto',
-              padding: '0 24px',
-              textAlign: 'center',
-              position: 'relative',
-              zIndex: 1,
-            }}
-          >
+          <div className="relative z-[1] mx-auto max-w-[860px] px-6 text-center">
             {/* Eyebrow */}
             <motion.div
               variants={fadeUp}
               custom={0}
               initial="hidden"
               animate="visible"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 8,
-                padding: '6px 16px',
-                borderRadius: 999,
-                border: '1px solid hsl(134 61% 41% / 0.3)',
-                backgroundColor: 'hsl(134 61% 41% / 0.07)',
-                fontSize: 12,
-                fontWeight: 600,
-                color: C.green,
-                marginBottom: 36,
-                letterSpacing: '0.06em',
-                textTransform: 'uppercase',
-              }}
+              className="mb-9 inline-flex items-center gap-2 rounded-full border border-[hsl(var(--green)/0.3)] bg-[hsl(var(--green)/0.07)] px-4 py-1.5 text-[12px] font-[600] uppercase tracking-[0.06em] text-[hsl(var(--green))]"
             >
               <motion.span
                 animate={{ scale: [1, 1.3, 1] }}
                 transition={{ repeat: Infinity, duration: 2, ease: 'easeInOut' }}
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: '50%',
-                  backgroundColor: C.green,
-                  display: 'inline-block',
-                  flexShrink: 0,
-                }}
+                className="inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[hsl(var(--green))]"
               />
               WhatsApp Business Platform for Indian SMBs
             </motion.div>
@@ -504,24 +318,10 @@ export default function LandingPage() {
               custom={1}
               initial="hidden"
               animate="visible"
-              style={{
-                fontSize: 'clamp(2.6rem, 7vw, 4.5rem)',
-                fontWeight: 800,
-                lineHeight: 1.05,
-                letterSpacing: '-0.04em',
-                margin: '0 auto 28px',
-                color: C.fg,
-              }}
+              className="mx-auto mb-7 text-[clamp(2.6rem,7vw,4.5rem)] font-[800] leading-[1.05] tracking-[-0.04em] text-[hsl(var(--foreground))]"
             >
               WhatsApp conversations,{' '}
-              <span
-                style={{
-                  background: `linear-gradient(135deg, ${C.green}, ${C.purple})`,
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
-                  backgroundClip: 'text',
-                }}
-              >
+              <span className="bg-gradient-to-br from-[hsl(var(--green))] to-[hsl(var(--purple))] bg-clip-text text-transparent">
                 at business scale
               </span>
             </motion.h1>
@@ -532,13 +332,7 @@ export default function LandingPage() {
               custom={2}
               initial="hidden"
               animate="visible"
-              style={{
-                fontSize: 18,
-                lineHeight: 1.7,
-                color: C.muted,
-                maxWidth: 580,
-                margin: '0 auto 48px',
-              }}
+              className="mx-auto mb-12 max-w-[580px] text-[18px] leading-[1.7] text-[hsl(var(--muted-foreground))]"
             >
               Connect your number, manage every conversation, run personalised broadcast campaigns, and track delivery —
               all in one dashboard built for the speed of Indian business.
@@ -550,30 +344,12 @@ export default function LandingPage() {
               custom={3}
               initial="hidden"
               animate="visible"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 12,
-                flexWrap: 'wrap',
-              }}
+              className="flex flex-wrap items-center justify-center gap-3"
             >
               <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }}>
                 <Link
                   href="/register"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '13px 28px',
-                    borderRadius: 12,
-                    fontSize: 15,
-                    fontWeight: 700,
-                    backgroundColor: C.green,
-                    color: 'hsl(134 100% 5%)',
-                    textDecoration: 'none',
-                    boxShadow: '0 0 40px hsl(134 61% 41% / 0.4)',
-                  }}
+                  className="inline-flex items-center gap-2 rounded-xl bg-[hsl(var(--green))] px-7 py-[13px] text-[15px] font-[700] text-white no-underline shadow-[0_0_40px_hsl(var(--green)/0.4)]"
                 >
                   Start for free
                   <ArrowRight size={16} />
@@ -582,19 +358,7 @@ export default function LandingPage() {
               <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }}>
                 <Link
                   href="/login"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '13px 28px',
-                    borderRadius: 12,
-                    fontSize: 15,
-                    fontWeight: 500,
-                    border: `1px solid ${C.border}`,
-                    color: C.fg,
-                    textDecoration: 'none',
-                    backgroundColor: C.card,
-                  }}
+                  className="inline-flex items-center gap-2 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-7 py-[13px] text-[15px] font-[500] text-[hsl(var(--foreground))] no-underline"
                 >
                   Sign in
                 </Link>
@@ -607,27 +371,11 @@ export default function LandingPage() {
               custom={4}
               initial="hidden"
               animate="visible"
-              style={{
-                marginTop: 28,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 20,
-                flexWrap: 'wrap',
-              }}
+              className="mt-7 flex flex-wrap items-center justify-center gap-5"
             >
               {['No credit card needed', 'Setup in 5 minutes', 'Cancel anytime'].map((item, i) => (
-                <div
-                  key={i}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    fontSize: 13,
-                    color: C.muted,
-                  }}
-                >
-                  <CheckCircle2 size={13} color={C.green} />
+                <div key={i} className="flex items-center gap-1.5 text-[13px] text-[hsl(var(--muted-foreground))]">
+                  <CheckCircle2 size={13} className="text-[hsl(var(--green))]" />
                   {item}
                 </div>
               ))}
@@ -640,52 +388,25 @@ export default function LandingPage() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 2, duration: 0.6 }}
-          style={{
-            position: 'absolute',
-            bottom: 36,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: 4,
-          }}
+          className="absolute bottom-9 left-1/2 flex -translate-x-1/2 flex-col items-center gap-1"
         >
           <motion.div animate={{ y: [0, 6, 0] }} transition={{ repeat: Infinity, duration: 2, ease: 'easeInOut' }}>
-            <ChevronDown size={18} color={C.muted} />
+            <ChevronDown size={18} className="text-[hsl(var(--muted-foreground))]" />
           </motion.div>
         </motion.div>
       </section>
 
       {/* ── Stats ── */}
-      <section
-        style={{
-          borderTop: `1px solid ${C.border}`,
-          borderBottom: `1px solid ${C.border}`,
-          padding: '56px 24px',
-          position: 'relative',
-          overflow: 'hidden',
-        }}
-      >
+      <section className="relative overflow-hidden border-y border-[hsl(var(--border))] px-6 py-14">
         <div
           aria-hidden
-          style={{
-            position: 'absolute',
-            inset: 0,
-            background: `linear-gradient(90deg, transparent, hsl(134 61% 41% / 0.03), hsl(263 70% 56% / 0.03), transparent)`,
-          }}
+          className="absolute inset-0 bg-gradient-to-r from-transparent via-[hsl(var(--green)/0.03)] to-transparent"
         />
         <div
-          style={{
-            maxWidth: 900,
-            margin: '0 auto',
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-            gap: 32,
-            position: 'relative',
-            zIndex: 1,
-          }}
-        >
+          aria-hidden
+          className="absolute inset-0 bg-gradient-to-l from-transparent via-[hsl(var(--purple)/0.03)] to-transparent"
+        />
+        <div className="relative z-[1] mx-auto grid max-w-[900px] grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-8">
           {STATS.map((stat, i) => (
             <motion.div
               key={i}
@@ -694,84 +415,40 @@ export default function LandingPage() {
               initial="hidden"
               whileInView="visible"
               viewport={{ once: true }}
-              style={{ textAlign: 'center' }}
+              className="text-center"
             >
-              <p
-                style={{
-                  fontSize: 36,
-                  fontWeight: 800,
-                  letterSpacing: '-0.04em',
-                  lineHeight: 1,
-                  marginBottom: 8,
-                  background: `linear-gradient(135deg, ${C.green}, ${C.purple})`,
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
-                  backgroundClip: 'text',
-                }}
-              >
+              <p className="mb-2 bg-gradient-to-br from-[hsl(var(--green))] to-[hsl(var(--purple))] bg-clip-text text-[36px] font-[800] leading-none tracking-[-0.04em] text-transparent">
                 {stat.value}
               </p>
-              <p style={{ fontSize: 13, color: C.muted, margin: 0, letterSpacing: '0.01em' }}>{stat.label}</p>
+              <p className="m-0 text-[13px] tracking-[0.01em] text-[hsl(var(--muted-foreground))]">{stat.label}</p>
             </motion.div>
           ))}
         </div>
       </section>
 
       {/* ── Features ── */}
-      <section style={{ maxWidth: 1140, margin: '0 auto', padding: '112px 24px' }}>
+      <section className="mx-auto max-w-[1140px] px-6 py-28">
         <motion.div
           variants={fadeUp}
           custom={0}
           initial="hidden"
           whileInView="visible"
           viewport={{ once: true }}
-          style={{ textAlign: 'center', marginBottom: 72 }}
+          className="mb-[72px] text-center"
         >
-          <p
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              letterSpacing: '0.12em',
-              textTransform: 'uppercase',
-              color: C.green,
-              marginBottom: 16,
-            }}
-          >
+          <p className="mb-4 text-[11px] font-[700] uppercase tracking-[0.12em] text-[hsl(var(--green))]">
             Platform capabilities
           </p>
-          <h2
-            style={{
-              fontSize: 'clamp(1.8rem, 4vw, 2.8rem)',
-              fontWeight: 800,
-              letterSpacing: '-0.03em',
-              margin: '0 auto 20px',
-              maxWidth: 640,
-              lineHeight: 1.15,
-            }}
-          >
+          <h2 className="mx-auto mb-5 max-w-[640px] text-[clamp(1.8rem,4vw,2.8rem)] font-[800] leading-[1.15] tracking-[-0.03em] text-[hsl(var(--foreground))]">
             Everything your team needs to run WhatsApp like a pro
           </h2>
-          <p
-            style={{
-              fontSize: 16,
-              color: C.muted,
-              maxWidth: 480,
-              margin: '0 auto',
-              lineHeight: 1.7,
-            }}
-          >
+          <p className="mx-auto max-w-[480px] text-[16px] leading-[1.7] text-[hsl(var(--muted-foreground))]">
             One platform that replaces your manual WhatsApp workflow, your broadcast spreadsheet, and your support
             inbox.
           </p>
         </motion.div>
 
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-            gap: 16,
-          }}
-        >
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] gap-4">
           {FEATURES.map((feature, i) => (
             <FeatureCard key={i} feature={feature} index={i} />
           ))}
@@ -779,57 +456,27 @@ export default function LandingPage() {
       </section>
 
       {/* ── Testimonials ── */}
-      <section
-        style={{
-          borderTop: `1px solid ${C.border}`,
-          padding: '112px 24px',
-          position: 'relative',
-          overflow: 'hidden',
-        }}
-      >
-        <GlowOrb x="50%" y="50%" color={C.purple} size={700} opacity={0.06} />
+      <section className="relative overflow-hidden border-t border-[hsl(var(--border))] px-6 py-28">
+        <GlowOrb x="50%" y="50%" variant="purple" size={700} />
 
-        <div style={{ maxWidth: 1140, margin: '0 auto', position: 'relative', zIndex: 1 }}>
+        <div className="relative z-[1] mx-auto max-w-[1140px]">
           <motion.div
             variants={fadeUp}
             custom={0}
             initial="hidden"
             whileInView="visible"
             viewport={{ once: true }}
-            style={{ textAlign: 'center', marginBottom: 64 }}
+            className="mb-16 text-center"
           >
-            <p
-              style={{
-                fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: '0.12em',
-                textTransform: 'uppercase',
-                color: C.purple,
-                marginBottom: 16,
-              }}
-            >
+            <p className="mb-4 text-[11px] font-[700] uppercase tracking-[0.12em] text-[hsl(var(--purple))]">
               Early feedback
             </p>
-            <h2
-              style={{
-                fontSize: 'clamp(1.8rem, 4vw, 2.6rem)',
-                fontWeight: 800,
-                letterSpacing: '-0.03em',
-                margin: 0,
-                lineHeight: 1.15,
-              }}
-            >
+            <h2 className="m-0 text-[clamp(1.8rem,4vw,2.6rem)] font-[800] leading-[1.15] tracking-[-0.03em] text-[hsl(var(--foreground))]">
               Teams switching from manual WhatsApp
             </h2>
           </motion.div>
 
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-              gap: 16,
-            }}
-          >
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-4">
             {TESTIMONIALS.map((t, i) => (
               <TestimonialCard key={i} t={t} index={i} />
             ))}
@@ -838,15 +485,8 @@ export default function LandingPage() {
       </section>
 
       {/* ── Final CTA ── */}
-      <section
-        style={{
-          borderTop: `1px solid ${C.border}`,
-          padding: '112px 24px 128px',
-          position: 'relative',
-          overflow: 'hidden',
-        }}
-      >
-        <GlowOrb x="50%" y="50%" color={C.green} size={800} opacity={0.07} />
+      <section className="relative overflow-hidden border-t border-[hsl(var(--border))] px-6 pb-32 pt-28">
+        <GlowOrb x="50%" y="50%" variant="green" size={800} />
 
         <motion.div
           variants={fadeUp}
@@ -854,110 +494,46 @@ export default function LandingPage() {
           initial="hidden"
           whileInView="visible"
           viewport={{ once: true }}
-          style={{
-            maxWidth: 640,
-            margin: '0 auto',
-            textAlign: 'center',
-            position: 'relative',
-            zIndex: 1,
-          }}
+          className="relative z-[1] mx-auto max-w-[640px] text-center"
         >
-          <p
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              letterSpacing: '0.12em',
-              textTransform: 'uppercase',
-              color: C.green,
-              marginBottom: 20,
-            }}
-          >
+          <p className="mb-5 text-[11px] font-[700] uppercase tracking-[0.12em] text-[hsl(var(--green))]">
             Get started today
           </p>
-          <h2
-            style={{
-              fontSize: 'clamp(2rem, 5vw, 3.4rem)',
-              fontWeight: 800,
-              letterSpacing: '-0.04em',
-              lineHeight: 1.1,
-              marginBottom: 24,
-            }}
-          >
+          <h2 className="mb-6 text-[clamp(2rem,5vw,3.4rem)] font-[800] leading-[1.1] tracking-[-0.04em] text-[hsl(var(--foreground))]">
             Your next customer is already on WhatsApp
           </h2>
-          <p
-            style={{
-              fontSize: 17,
-              color: C.muted,
-              lineHeight: 1.7,
-              marginBottom: 48,
-            }}
-          >
+          <p className="mb-12 text-[17px] leading-[1.7] text-[hsl(var(--muted-foreground))]">
             Join the businesses using NotifyTechAI to turn WhatsApp into their highest-converting channel.
           </p>
 
-          <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} style={{ display: 'inline-block' }}>
+          <motion.div whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} className="inline-block">
             <Link
               href="/register"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 10,
-                padding: '16px 36px',
-                borderRadius: 14,
-                fontSize: 16,
-                fontWeight: 700,
-                backgroundColor: C.green,
-                color: 'hsl(134 100% 5%)',
-                textDecoration: 'none',
-                boxShadow: '0 0 60px hsl(134 61% 41% / 0.4)',
-                letterSpacing: '-0.01em',
-              }}
+              className="inline-flex items-center gap-2.5 rounded-[14px] bg-[hsl(var(--green))] px-9 py-4 text-[16px] font-[700] tracking-[-0.01em] text-white no-underline shadow-[0_0_60px_hsl(var(--green)/0.4)]"
             >
               Start for free
               <ArrowRight size={18} />
             </Link>
           </motion.div>
 
-          <p style={{ marginTop: 20, fontSize: 13, color: C.muted }}>No credit card required · Set up in 5 minutes</p>
+          <p className="mt-5 text-[13px] text-[hsl(var(--muted-foreground))]">
+            No credit card required · Set up in 5 minutes
+          </p>
         </motion.div>
       </section>
 
       {/* ── Footer ── */}
-      <footer
-        style={{
-          borderTop: `1px solid ${C.border}`,
-          padding: '32px 24px',
-        }}
-      >
-        <div
-          style={{
-            maxWidth: 1140,
-            margin: '0 auto',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            gap: 16,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div
-              style={{
-                width: 26,
-                height: 26,
-                borderRadius: 8,
-                backgroundColor: C.green,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Zap size={13} color="hsl(134 100% 5%)" strokeWidth={2.5} />
+      <footer className="border-t border-[hsl(var(--border))] px-6 py-8">
+        <div className="mx-auto flex max-w-[1140px] flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-[26px] w-[26px] items-center justify-center rounded-lg bg-[hsl(var(--green))]">
+              <Zap size={13} className="text-white" strokeWidth={2.5} />
             </div>
-            <span style={{ fontSize: 14, fontWeight: 700, letterSpacing: '-0.01em' }}>NotifyTechAI</span>
+            <span className="text-[14px] font-[700] tracking-[-0.01em] text-[hsl(var(--foreground))]">
+              NotifyTechAI
+            </span>
           </div>
-          <p style={{ fontSize: 13, color: C.muted, margin: 0 }}>
+          <p className="m-0 text-[13px] text-[hsl(var(--muted-foreground))]">
             © {new Date().getFullYear()} NotifyTechAI · Built for Indian businesses
           </p>
         </div>

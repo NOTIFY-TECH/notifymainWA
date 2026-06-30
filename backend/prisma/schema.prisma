@@ -18,8 +18,6 @@ enum UserRole {
   TENANT_ADMIN
   MANAGER
   AGENT
-  VIEWER
-  API_USER
 }
 
 enum SessionStatus {
@@ -147,6 +145,7 @@ model Tenant {
   maxMessages          Int              @default(1000)
   maxContacts          Int              @default(500)
   razorpayCustomerId   String?          @db.VarChar(100)
+  ownerAwayUntil       DateTime?
   metadata             Json?
   createdAt            DateTime         @default(now())
   updatedAt            DateTime         @updatedAt
@@ -184,6 +183,7 @@ model User {
   firstName    String    @db.VarChar(50)
   lastName     String    @db.VarChar(50)
   role         UserRole  @default(AGENT)
+  managerId    String?   @db.Uuid
   avatarUrl    String?   @db.VarChar(500)
   isActive     Boolean   @default(true)
   lastLoginAt  DateTime?
@@ -194,6 +194,9 @@ model User {
   deletedAt    DateTime?
 
   tenant                Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  manager               User?          @relation("ManagerAgents", fields: [managerId], references: [id], onDelete: SetNull)
+  agents                User[]         @relation("ManagerAgents")
+  sentMessages          Message[]      @relation("MessageSender")
   refreshTokens         RefreshToken[]
   assignedConversations Conversation[] @relation("AssignedAgent")
   auditLogs             AuditLog[]
@@ -204,6 +207,7 @@ model User {
   @@unique([tenantId, email])
   @@index([tenantId])
   @@index([tenantId, isActive])
+  @@index([managerId])
   @@map("users")
 }
 
@@ -358,6 +362,7 @@ model Message {
   sessionId      String?           @db.Uuid
   conversationId String?          @db.Uuid
   campaignId     String?          @db.Uuid
+  sentByUserId   String?          @db.Uuid
   direction      MessageDirection
   type           MessageType      @default(TEXT)
   status         MessageStatus    @default(PENDING)
@@ -382,12 +387,14 @@ model Message {
   session      Session?      @relation(fields: [sessionId], references: [id], onDelete: SetNull)
   conversation Conversation? @relation(fields: [conversationId], references: [id])
   campaign     Campaign?     @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  sentByUser   User?         @relation("MessageSender", fields: [sentByUserId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, createdAt])
   @@index([tenantId, conversationId])
   @@index([tenantId, campaignId])
   @@index([externalId])
   @@index([toNumber, tenantId])
+  @@index([sentByUserId])
   @@map("messages")
 }
 

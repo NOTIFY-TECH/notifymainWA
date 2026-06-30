@@ -18,13 +18,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   useNotifications();
 
   useEffect(() => {
-    if (!rehydrated) return; // wait for AuthRehydrator to finish
+    if (!rehydrated) return;
     if (!isAuthenticated) {
-      router.replace('/login'); // no valid session → go to login
+      router.replace('/login');
     }
   }, [rehydrated, isAuthenticated]);
 
-  // Show nothing until rehydration is done
   if (!rehydrated || !isAuthenticated) return null;
 
   return (
@@ -33,14 +32,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <TopBar />
       <main
         className={cn(
-          'min-h-screen pt-14',
+          'min-h-screen pt-[56px]',
           'transition-all duration-300 ease-in-out',
           'ml-0',
-          'md:ml-[64px]',
-          sidebarOpen ? 'lg:ml-[240px]' : 'lg:ml-[64px]',
+          'md:ml-[60px]',
+          sidebarOpen ? 'lg:ml-[240px]' : 'lg:ml-[60px]',
         )}
       >
-        <div className="p-4 sm:p-6">{children}</div>
+        {/* Page content wrapper — generous padding, max readable width */}
+        <div className="p-5 sm:p-6">{children}</div>
       </main>
     </div>
   );

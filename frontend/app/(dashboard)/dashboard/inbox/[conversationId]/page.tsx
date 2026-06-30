@@ -23,10 +23,12 @@ export default function ConversationPage({ params }: Props) {
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)] -m-4 sm:-m-6 overflow-hidden">
-      <div className="hidden md:flex w-[320px] lg:w-[360px] shrink-0 flex-col border-r border-[hsl(var(--border))]">
+      {/* Conversation list — white card surface */}
+      <div className="hidden md:flex w-[320px] lg:w-[360px] shrink-0 flex-col border-r border-[hsl(var(--border))] bg-[hsl(var(--card))]">
         <ConversationList activeId={conversationId} onSelect={handleSelect} />
       </div>
-      <div className="flex-1 flex flex-col min-w-0">
+      {/* Thread panel — slightly off-white page background for depth */}
+      <div className="flex-1 flex flex-col min-w-0 bg-[hsl(var(--background))]">
         <ThreadView key={conversationId} conversationId={conversationId} onBack={handleBack} />
       </div>
     </div>

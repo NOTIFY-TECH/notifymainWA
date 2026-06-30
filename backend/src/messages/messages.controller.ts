@@ -45,12 +45,7 @@ export class MessagesController {
   }
 
   @Get()
-  @Roles(
-    UserRole.TENANT_OWNER,
-    UserRole.TENANT_ADMIN,
-    UserRole.AGENT,
-    UserRole.VIEWER,
-  )
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   async listMessages(
     @Param('tenantId') tenantId: string,
     @Query() query: ListMessagesDto,

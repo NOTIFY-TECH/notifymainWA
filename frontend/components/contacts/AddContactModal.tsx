@@ -174,13 +174,13 @@ export default function AddContactModal({ open, onClose }: AddContactModalProps)
     <Dialog open={open} onOpenChange={v => !v && handleClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="text-base font-semibold">Add contact</DialogTitle>
+          <DialogTitle className="text-[15px] font-[600]">Add contact</DialogTitle>
         </DialogHeader>
 
         <div className="flex flex-col gap-4 pt-1">
           {/* Name */}
           <div className="space-y-1.5">
-            <Label htmlFor="ac-name" className="text-xs font-medium text-[hsl(var(--muted-foreground))]">
+            <Label htmlFor="ac-name" className="text-[11px] font-[500] text-[hsl(var(--muted-foreground))]">
               Name <span className="text-red-400">*</span>
             </Label>
             <Input id="ac-name" placeholder="Rahul Sharma" value={form.name} onChange={set('name')} />
@@ -188,7 +188,7 @@ export default function AddContactModal({ open, onClose }: AddContactModalProps)
 
           {/* Phone */}
           <div className="space-y-1.5">
-            <Label htmlFor="ac-phone" className="text-xs font-medium text-[hsl(var(--muted-foreground))]">
+            <Label htmlFor="ac-phone" className="text-[11px] font-[500] text-[hsl(var(--muted-foreground))]">
               Phone number <span className="text-red-400">*</span>
             </Label>
             <Input
@@ -205,7 +205,7 @@ export default function AddContactModal({ open, onClose }: AddContactModalProps)
 
           {/* Email */}
           <div className="space-y-1.5">
-            <Label htmlFor="ac-email" className="text-xs font-medium text-[hsl(var(--muted-foreground))]">
+            <Label htmlFor="ac-email" className="text-[11px] font-[500] text-[hsl(var(--muted-foreground))]">
               Email
             </Label>
             <Input
@@ -219,7 +219,7 @@ export default function AddContactModal({ open, onClose }: AddContactModalProps)
 
           {/* Tags */}
           <div className="space-y-1.5">
-            <Label className="text-xs font-medium text-[hsl(var(--muted-foreground))]">Tags</Label>
+            <Label className="text-[11px] font-[500] text-[hsl(var(--muted-foreground))]">Tags</Label>
 
             {/* Selected tag chips */}
             {tags.length > 0 && (
@@ -227,7 +227,7 @@ export default function AddContactModal({ open, onClose }: AddContactModalProps)
                 {tags.map(tag => (
                   <span
                     key={tag}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-[#22C55E]/10 border border-[#22C55E]/20 text-[hsl(var(--green))]"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-[600] bg-emerald-50 border border-emerald-200 text-emerald-700"
                   >
                     {tag}
                     <button
@@ -256,20 +256,20 @@ export default function AddContactModal({ open, onClose }: AddContactModalProps)
                 onFocus={() => setDropdownOpen(true)}
                 onKeyDown={handleTagKeyDown}
                 placeholder="Type to search or add a tag…"
-                className="w-full rounded-md border border-[hsl(var(--border))] bg-transparent px-3 py-1.5 text-sm placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-1 focus:ring-[hsl(var(--green))]"
+                className="w-full rounded-md border border-[hsl(var(--border))] bg-transparent px-3 py-1.5 text-[13px] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-1 focus:ring-emerald-400/50 focus:border-emerald-400/60 transition-colors"
               />
 
               {dropdownOpen && suggestions.length > 0 && (
-                <div className="absolute z-10 mt-1 w-full rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-lg overflow-hidden max-h-48 overflow-y-auto">
+                <div className="absolute z-10 mt-1 w-full rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-[var(--shadow-md)] overflow-hidden max-h-48 overflow-y-auto">
                   {suggestions.map((s, i) => (
                     <button
                       key={s.tag}
                       type="button"
                       onMouseDown={e => e.preventDefault()} // keep input focused
                       onClick={() => commitTag(s.tag)}
-                      className={`w-full flex items-center justify-between px-3 py-1.5 text-xs text-left transition-colors ${
+                      className={`w-full flex items-center justify-between px-3 py-1.5 text-[12px] text-left transition-colors ${
                         i === safeHighlightedIndex
-                          ? 'bg-[#22C55E]/10 text-[hsl(var(--green))]'
+                          ? 'bg-emerald-50 text-emerald-700'
                           : 'text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))]'
                       }`}
                     >
@@ -287,7 +287,7 @@ export default function AddContactModal({ open, onClose }: AddContactModalProps)
 
           {/* Notes */}
           <div className="space-y-1.5">
-            <Label htmlFor="ac-notes" className="text-xs font-medium text-[hsl(var(--muted-foreground))]">
+            <Label htmlFor="ac-notes" className="text-[11px] font-[500] text-[hsl(var(--muted-foreground))]">
               Notes
             </Label>
             <textarea
@@ -296,7 +296,7 @@ export default function AddContactModal({ open, onClose }: AddContactModalProps)
               placeholder="Any notes about this contact..."
               value={form.notes}
               onChange={set('notes')}
-              className="w-full rounded-md border border-[hsl(var(--border))] bg-transparent px-3 py-2 text-sm placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-1 focus:ring-[hsl(var(--green))] resize-none"
+              className="w-full rounded-md border border-[hsl(var(--border))] bg-transparent px-3 py-2 text-[13px] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-1 focus:ring-emerald-400/50 focus:border-emerald-400/60 resize-none transition-colors"
             />
           </div>
 
@@ -304,7 +304,7 @@ export default function AddContactModal({ open, onClose }: AddContactModalProps)
           {error && (
             <div className="flex items-center gap-2 rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2">
               <X className="w-3.5 h-3.5 text-red-400 shrink-0" />
-              <p className="text-xs text-red-400">{error}</p>
+              <p className="text-[12px] text-red-400">{error}</p>
             </div>
           )}
 
@@ -317,7 +317,7 @@ export default function AddContactModal({ open, onClose }: AddContactModalProps)
               size="sm"
               onClick={handleSubmit}
               disabled={isPending}
-              className="bg-[#22C55E]/20 border border-[#22C55E]/30 text-[hsl(var(--green))] hover:bg-[#22C55E]/30"
+              className="bg-emerald-500 text-white hover:opacity-90 shadow-sm"
             >
               {isPending ? 'Adding…' : 'Add contact'}
             </Button>

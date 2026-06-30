@@ -16,6 +16,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { TenantGuard } from '../common/guards/tenant.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
+import { AllowDelegation } from '../common/decorators/allow-delegation.decorator';
 import { UserRole } from '@prisma/client';
 
 @ApiTags('Tenants')
@@ -75,11 +76,20 @@ export class TenantsController {
   // Owner-only: name/email are the only self-service fields; plan and
   // usage limits are billing/admin-controlled, not exposed here. An email
   // change does not take effect immediately — see TenantsService.updateProfile.
+  //
+  // UPDATED (RBAC hierarchy feature) — @AllowDelegation() added. This is a
+  // company-profile route, which falls under "no one but Owner / Admin-while-
+  // elevated touches company profile". A TENANT_ADMIN can now reach this
+  // route ONLY while the tenant's owner-away window is active (see RolesGuard).
   @Patch(':tenantId')
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Update tenant profile (name/email) — owner only' })
+  @ApiOperation({
+    summary:
+      'Update tenant profile (name/email) — owner only, or admin during owner-away',
+  })
   @UseGuards(JwtAuthGuard, TenantGuard, RolesGuard)
   @Roles(UserRole.TENANT_OWNER)
+  @AllowDelegation()
   updateProfile(
     @Param('tenantId') tenantId: string,
     @Body() dto: UpdateTenantDto,
@@ -99,5 +109,35 @@ export class TenantsController {
   @Roles(UserRole.TENANT_OWNER)
   resendVerification(@Param('tenantId') tenantId: string) {
     return this.tenantsService.resendVerification(tenantId);
+  }
+
+  // NEW (RBAC hierarchy feature) — Owner marks themselves away. Strictly
+  // TENANT_OWNER — no @AllowDelegation() here, since this route itself is
+  // what GRANTS delegation. An already-elevated Admin must not be able to
+  // re-trigger/extend their own elevation by calling this.
+  @Post(':tenantId/owner-away')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary:
+      'Mark Owner as away, temporarily delegating Owner-gated actions to Admin — owner only',
+  })
+  @UseGuards(JwtAuthGuard, TenantGuard, RolesGuard)
+  @Roles(UserRole.TENANT_OWNER)
+  ownerAway(@Param('tenantId') tenantId: string) {
+    return this.tenantsService.ownerAway(tenantId);
+  }
+
+  // NEW (RBAC hierarchy feature) — ends delegation early. Strictly
+  // TENANT_OWNER per project decision: Admin cannot self-deescalate their
+  // own elevated access, only the Owner can end it.
+  @Post(':tenantId/owner-away/cancel')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Cancel an active owner-away delegation window — owner only',
+  })
+  @UseGuards(JwtAuthGuard, TenantGuard, RolesGuard)
+  @Roles(UserRole.TENANT_OWNER)
+  cancelOwnerAway(@Param('tenantId') tenantId: string) {
+    return this.tenantsService.cancelOwnerAway(tenantId);
   }
 }

@@ -51,12 +51,7 @@ export class CampaignsController {
   constructor(private readonly campaignsService: CampaignsService) {}
 
   @Get()
-  @Roles(
-    UserRole.TENANT_OWNER,
-    UserRole.TENANT_ADMIN,
-    UserRole.AGENT,
-    UserRole.VIEWER,
-  )
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   listCampaigns(
     @Param('tenantId') tenantId: string,
     @Query() query: ListCampaignsDto,
@@ -75,12 +70,7 @@ export class CampaignsController {
   }
 
   @Get(':campaignId')
-  @Roles(
-    UserRole.TENANT_OWNER,
-    UserRole.TENANT_ADMIN,
-    UserRole.AGENT,
-    UserRole.VIEWER,
-  )
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   getCampaign(
     @Param('tenantId') tenantId: string,
     @Param('campaignId') campaignId: string,

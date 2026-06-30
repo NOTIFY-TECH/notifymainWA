@@ -140,20 +140,6 @@ export class WebhooksProcessor extends WorkerHost {
   }
 
   // ── Safely re-attach or delete orphaned null-sessionId conversations ──────
-  //
-  // The naive updateMany(sessionId: null → sessionId) fails with a unique
-  // constraint error when:
-  //   a) A live row for (tenantId, sessionId, phoneNumber) already exists
-  //      (keeper exists) — updating any orphan would create a duplicate.
-  //   b) Multiple null-sessionId orphans exist for the same phoneNumber
-  //      (updating them all to the same sessionId creates duplicates among
-  //      themselves, even when no keeper exists).
-  //
-  // Strategy:
-  //   • Keeper exists → delete ALL orphans (redundant; upsert below hits keeper)
-  //   • No keeper → delete all orphans except the oldest one, then re-stamp
-  //     that single surviving orphan with the current sessionId so the upsert
-  //     below hits it via the unique index instead of creating a second row.
   private async reattachOrphan(
     tenantId: string,
     sessionId: string,
@@ -165,46 +151,65 @@ export class WebhooksProcessor extends WorkerHost {
     });
 
     if (keeperExists) {
-      // Live row exists — all orphans are redundant, delete them all.
       await this.prisma.conversation.deleteMany({
         where: { tenantId, phoneNumber, sessionId: null },
       });
       return;
     }
 
-    // No live row — find all orphans for this phone.
     const orphans = await this.prisma.conversation.findMany({
       where: { tenantId, phoneNumber, sessionId: null },
       select: { id: true },
-      orderBy: { createdAt: 'asc' }, // oldest first — keep the original
+      orderBy: { createdAt: 'asc' },
     });
 
     if (orphans.length === 0) return;
 
     if (orphans.length > 1) {
-      // Delete all but the oldest orphan to avoid self-collision on updateMany.
       const idsToDelete = orphans.slice(1).map((o) => o.id);
       await this.prisma.conversation.deleteMany({
         where: { id: { in: idsToDelete } },
       });
     }
 
-    // Re-stamp the single surviving orphan with the current sessionId.
     await this.prisma.conversation.update({
       where: { id: orphans[0].id },
       data: { sessionId },
     });
   }
 
-  // ── FIX (session 24) ───────────────────────────────────────────────────
-  // The engine wraps every webhook body as { sessionId, payload: <data>, ... }
-  // (see SessionManager.emitWebhook in the engine). Every other handler in
-  // this file correctly reads `data.payload` for the actual content
-  // (see handleMessageReceived / handleMessageOutgoing below). This handler
-  // was incorrectly destructuring `chats` directly off the top-level `data`
-  // object, where it never existed — so `chats` was always undefined and
-  // every chat sync silently fell into the "no chats in payload" branch,
-  // even when the engine logs confirmed it emitted a populated chat list.
+  // ── Strip JID suffix from a Baileys-supplied address ─────────────────────
+  //
+  // Baileys sends addresses as full JIDs:
+  //   917999999999@s.whatsapp.net   (regular contacts)
+  //   12345678901234567890@lid      (linked-device contacts)
+  //
+  // Conversation.phoneNumber is stored as bare digits for regular contacts
+  // (e.g. 917999999999) — that's how campaigns, outbound sends, and message
+  // handlers (handleMessageReceived / handleMessageOutgoing) write it.
+  //
+  // FIX (session 27): handleSessionChatsSynced previously upserted using the
+  // RAW jid (with @s.whatsapp.net suffix intact) as phoneNumber, while
+  // handleMessageReceived/handleMessageOutgoing always normalised it first.
+  // This created two separate Conversation rows for the same contact under
+  // the unique (tenantId, sessionId, phoneNumber) index:
+  //   - one from chat sync:  phoneNumber = "917999999999@s.whatsapp.net"
+  //   - one from messages:   phoneNumber = "917999999999"
+  // The chat-sync row carried unreadCount/lastMessageText but ZERO Message
+  // rows (since messages always landed on the other row) — producing the
+  // "No messages yet" ghost conversations visible in the inbox list.
+  //
+  // All three webhook handlers (chats_synced, message.received,
+  // message.outgoing) now call this same normaliseJid() before any upsert,
+  // guaranteeing they always resolve to the same Conversation row.
+  private normaliseJid(jid: string): string {
+    if (jid.endsWith('@s.whatsapp.net')) {
+      return jid.split('@')[0]; // bare digits: 917999999999
+    }
+    // @lid, @g.us (groups), @broadcast, @newsletter — leave unchanged
+    return jid;
+  }
+
   private async handleSessionChatsSynced(data: any): Promise<void> {
     const { sessionId } = data;
     const chats = data.payload?.chats ?? [];
@@ -246,11 +251,15 @@ export class WebhooksProcessor extends WorkerHost {
       await Promise.all(
         batch.map(async (chat: any) => {
           try {
-            const jid: string = chat.jid ?? '';
-            if (!jid) return;
+            const rawJid: string = chat.jid ?? '';
+            if (!rawJid) return;
 
-            if (jid.endsWith('@newsletter') || jid.endsWith('@broadcast'))
+            if (rawJid.endsWith('@newsletter') || rawJid.endsWith('@broadcast'))
               return;
+
+            // FIX (session 27): normalise BEFORE upsert so this matches the
+            // same Conversation row that handleMessageReceived/Outgoing use.
+            const jid = this.normaliseJid(rawJid);
 
             const lastMessageAt = chat.lastMessageAt
               ? new Date(chat.lastMessageAt)
@@ -271,7 +280,42 @@ export class WebhooksProcessor extends WorkerHost {
                 ? chat.contactName.trim()
                 : null;
 
+            // FIX (session 27): WhatsApp pushes LID-directory metadata entries
+            // via chats.set/messaging-history.set for every contact in the
+            // linked-device address book, NOT just ones you've actually
+            // messaged. These arrive with empty lastMessageText, no
+            // contactName, and zero unreadCount — they are not real
+            // conversations. Creating a Conversation row for them produces
+            // hundreds of "No messages yet" ghosts in the inbox.
+            //
+            // Skip creating a NEW row for these. If a row already exists
+            // (e.g. a real conversation that's gone quiet), still allow the
+            // update branch to refresh it — but never CREATE from empty data.
+            const hasRealContent =
+              lastMessageText.trim().length > 0 ||
+              unreadCount > 0 ||
+              !!contactName;
+
             await this.reattachOrphan(session.tenantId, session.id, jid);
+
+            if (!hasRealContent) {
+              // Only update if a real row already exists; never create.
+              const updateResult = await this.prisma.conversation.updateMany({
+                where: {
+                  tenantId: session.tenantId,
+                  sessionId: session.id,
+                  phoneNumber: jid,
+                },
+                data: {
+                  lastMessageAt,
+                  lastMessageText,
+                  unreadCount,
+                  ...(contactName ? { contactName } : {}),
+                },
+              });
+              if (updateResult.count > 0) upsertedCount++;
+              return;
+            }
 
             await this.prisma.conversation.upsert({
               where: {
@@ -336,28 +380,6 @@ export class WebhooksProcessor extends WorkerHost {
     return result.valid ? result.normalised : null;
   }
 
-  // ── Strip JID suffix from a Baileys-supplied address ─────────────────────
-  //
-  // Baileys sends fromNumber / toNumber as full JIDs:
-  //   917999999999@s.whatsapp.net   (regular contacts)
-  //   12345678901234567890@lid      (linked-device contacts)
-  //
-  // Conversation.phoneNumber is stored as bare digits for regular contacts
-  // (e.g. 917999999999) — that's how campaigns and outbound sends write it.
-  // If we upsert with the full JID, the unique index (tenantId, sessionId,
-  // phoneNumber) finds no match and creates a duplicate conversation row.
-  //
-  // For @lid JIDs we leave them as-is (digits@lid) because we have no phone
-  // number to match against anyway — the existing conversation for that
-  // contact, if any, also has phoneNumber = the full @lid string.
-  private normaliseJid(jid: string): string {
-    if (jid.endsWith('@s.whatsapp.net')) {
-      return jid.split('@')[0]; // bare digits: 917999999999
-    }
-    // @lid, @g.us (groups), @broadcast, @newsletter — leave unchanged
-    return jid;
-  }
-
   private async handleMessageReceived(data: any): Promise<void> {
     try {
       const payload = data.payload ?? {};
@@ -399,11 +421,6 @@ export class WebhooksProcessor extends WorkerHost {
         return;
       }
 
-      // ── FIX (session 29) — strip @s.whatsapp.net suffix ─────────────────
-      // Baileys sends fromNumber as a full JID (e.g. 917999999999@s.whatsapp.net).
-      // Conversation.phoneNumber is stored as bare digits. Upserting with the
-      // full JID creates a duplicate conversation row instead of matching the
-      // existing one. @lid JIDs are left unchanged — no phone number to strip.
       const fromNumber = this.normaliseJid(rawFrom);
 
       const rawType: string = payload.type?.toUpperCase() ?? 'TEXT';
@@ -433,15 +450,6 @@ export class WebhooksProcessor extends WorkerHost {
 
       const matchPhone = this.resolveContactMatchPhone(payload, rawFrom);
 
-      // ── FIX (session 29) — fetch contact.name for CRM name priority ──────
-      // Previously only fetched id + whatsappName. We now also fetch name so
-      // contactName written to the Conversation row respects the same priority
-      // order as ConversationsService.listConversations():
-      //   1. contact.name (CRM name set by the tenant)  ← highest priority
-      //   2. pushName (WhatsApp display name)
-      //   3. null / fallback
-      // Without this, every inbound message overwrote contactName with the
-      // raw pushName even when the tenant had a proper CRM name saved.
       const contact = matchPhone
         ? await this.prisma.contact.findUnique({
             where: {
@@ -473,9 +481,6 @@ export class WebhooksProcessor extends WorkerHost {
         );
       }
 
-      // Resolve the contactName to write to the Conversation row.
-      // Priority: CRM name → pushName → null.
-      // We never overwrite a good CRM name with a raw WhatsApp pushName.
       const resolvedContactName: string | null =
         contact?.name?.trim() || incomingPushName || null;
 
@@ -505,9 +510,6 @@ export class WebhooksProcessor extends WorkerHost {
           lastMessageAt: now,
           lastMessageText: messageBody.slice(0, 500),
           ...(contact?.id ? { contactId: contact.id } : {}),
-          // Only update contactName when we have a resolved name.
-          // Never overwrite an existing CRM name with a bare pushName —
-          // the resolved value already respects priority (CRM > pushName).
           ...(resolvedContactName ? { contactName: resolvedContactName } : {}),
           status: 'OPEN',
         },
@@ -587,11 +589,6 @@ export class WebhooksProcessor extends WorkerHost {
 
       const rawTo: string = payload.to ?? '';
 
-      // ── FIX (session 29) — strip @s.whatsapp.net suffix ─────────────────
-      // Same JID normalisation as handleMessageReceived — outgoing messages
-      // sent from the phone app arrive via message.outgoing with a full JID
-      // in payload.to. Normalise before upsert to match the existing
-      // conversation row (stored as bare digits from the outbound send path).
       const toNumber = this.normaliseJid(rawTo);
 
       const rawType: string = payload.type?.toUpperCase() ?? 'TEXT';
@@ -765,20 +762,6 @@ export class WebhooksProcessor extends WorkerHost {
     }
   }
 
-  // ── Decrypt-failure handler ───────────────────────────────────────────────
-  // Fires when the engine receives a message it cannot decrypt (Baileys
-  // messageStubType === 2 / CIPHERTEXT). The message content is permanently
-  // lost — this handler only provides visibility:
-  //   1. Logs the event with session + sender info for debugging.
-  //   2. Looks up the conversation (if it exists) to attach a tenantId.
-  //   3. Emits a message:decrypt_failed WS event so the frontend can render
-  //      a "Message could not be decrypted" placeholder in the thread instead
-  //      of leaving a silent gap.
-  //
-  // Intentionally does NOT create a Message row — a row with no body and no
-  // externalId would be unrecoverable noise in the DB. The WS event is enough
-  // for the active frontend session; on refresh the placeholder disappears,
-  // which is acceptable given content is unrecoverable anyway.
   private async handleMessageDecryptFailed(data: any): Promise<void> {
     try {
       const payload = data.payload ?? {};
@@ -796,9 +779,6 @@ export class WebhooksProcessor extends WorkerHost {
         return;
       }
 
-      // Try to find an existing conversation so the frontend can route the
-      // placeholder to the right thread. Null if no conversation exists yet
-      // (e.g. first ever message from this contact failed to decrypt).
       const conversation = fromNumber
         ? await this.prisma.conversation.findFirst({
             where: {
@@ -825,8 +805,6 @@ export class WebhooksProcessor extends WorkerHost {
         `handleMessageDecryptFailed failed: ${error instanceof Error ? error.message : String(error)}`,
         error instanceof Error ? error.stack : undefined,
       );
-      // Do not rethrow — a decrypt-failure handler crashing would be ironic
-      // and unhelpful. Log and move on.
     }
   }
 

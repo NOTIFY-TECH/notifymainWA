@@ -16,10 +16,11 @@ import SendMessageForm from './SendMessageForm';
 import { Message } from '@/types/message';
 import { InfiniteData } from '@tanstack/react-query';
 import { CursorPaginatedResponse } from '@/types/index';
-import { Loader2, ArrowLeft, UserPlus, Check, X, Pencil } from 'lucide-react';
+import { Loader2, ArrowLeft, UserPlus, Check, X, Pencil, MessageSquare, ChevronUp } from 'lucide-react';
 import { contactsApi } from '@/services/contacts-api';
 import { useCreateContactFromConversation, useContact } from '@/hooks/useContacts';
 import ContactInfoForm from '@/components/contacts/ContactInfoForm';
+import { getAvatarColor } from './ConversationItem';
 
 interface ThreadViewProps {
   conversationId: string;
@@ -55,26 +56,26 @@ function SaveContactModal({ open, phoneDisplay, onSave, onClose, isPending }: Sa
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-sm mx-4 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-xl">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-sm mx-4 rounded-[var(--radius-lg)] border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-5 shadow-[var(--shadow-lg)]">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-[hsl(var(--foreground))]">Save as contact</h3>
+          <h3 className="text-[13px] font-[600] text-[hsl(var(--foreground))]">Save as contact</h3>
           <button
             onClick={onClose}
-            className="p-1 rounded-md hover:bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] transition-colors"
+            className="p-1.5 rounded-md hover:bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] transition-colors"
           >
-            <X size={14} />
+            <X size={13} />
           </button>
         </div>
         <div className="mb-3">
-          <p className="text-xs font-medium text-[hsl(var(--muted-foreground))] mb-1">Phone number</p>
-          <p className="text-sm text-[hsl(var(--foreground))] px-3 py-2 rounded-lg bg-[hsl(var(--muted))] border border-[hsl(var(--border))]">
+          <p className="text-[11px] font-[500] text-[hsl(var(--muted-foreground))] mb-1">Phone number</p>
+          <p className="text-[13px] text-[hsl(var(--foreground))] px-3 py-2 rounded-[var(--radius-sm)] bg-[hsl(var(--muted))] border border-[hsl(var(--border))]">
             {phoneDisplay}
           </p>
           <p className="text-[11px] text-[hsl(var(--muted-foreground))] mt-1">WhatsApp privacy ID — cannot be edited</p>
         </div>
         <div className="mb-4">
-          <label className="text-xs font-medium text-[hsl(var(--muted-foreground))] mb-1 block">
+          <label className="text-[11px] font-[500] text-[hsl(var(--muted-foreground))] mb-1 block">
             Name <span className="text-red-400">*</span>
           </label>
           <input
@@ -86,22 +87,22 @@ function SaveContactModal({ open, phoneDisplay, onSave, onClose, isPending }: Sa
             }}
             onKeyDown={e => e.key === 'Enter' && handleSave()}
             placeholder="e.g. Rahul Sharma"
-            className="w-full rounded-lg border border-[hsl(var(--border))] bg-transparent px-3 py-2 text-sm text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-1 focus:ring-[hsl(var(--green))]"
+            className="w-full rounded-[var(--radius-sm)] border border-[hsl(var(--border))] bg-transparent px-3 py-2 text-[13px] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-1 focus:ring-[hsl(var(--green))]/40 focus:border-[hsl(var(--green))]/60 transition-colors"
           />
-          {error && <p className="text-xs text-red-400 mt-1">{error}</p>}
+          {error && <p className="text-[11px] text-red-400 mt-1">{error}</p>}
         </div>
         <div className="flex justify-end gap-2">
           <button
             onClick={onClose}
             disabled={isPending}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium border border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] transition-colors disabled:opacity-50"
+            className="px-3 py-1.5 rounded-[var(--radius-sm)] text-[12px] font-[500] border border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] transition-colors disabled:opacity-50"
           >
             Cancel
           </button>
           <button
             onClick={handleSave}
             disabled={isPending || !name.trim()}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#22C55E]/20 border border-[#22C55E]/30 text-[hsl(var(--green))] hover:bg-[#22C55E]/30 transition-colors disabled:opacity-50"
+            className="px-3 py-1.5 rounded-[var(--radius-sm)] text-[12px] font-[600] bg-[hsl(var(--green))] text-white hover:bg-[hsl(142_71%_30%)] transition-colors disabled:opacity-50 shadow-sm"
           >
             {isPending ? 'Saving…' : 'Save contact'}
           </button>
@@ -112,10 +113,6 @@ function SaveContactModal({ open, phoneDisplay, onSave, onClose, isPending }: Sa
 }
 
 // ─── Edit Contact Modal ───────────────────────────────────────────────────────
-// Always renders ContactInfoForm in edit mode (isEditing={true}).
-// The key prop on ContactInfoForm resets its internal state each time the
-// modal opens, so stale form values never bleed through from a previous open.
-// No useEffect needed to reset isEditing — it's not tracked as state here.
 
 interface EditContactModalProps {
   open: boolean;
@@ -130,20 +127,20 @@ function EditContactModal({ open, contactId, onClose }: EditContactModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative z-10 w-full max-w-md mx-4 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-xl overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[hsl(var(--border))]">
-          <h3 className="text-sm font-semibold text-[hsl(var(--foreground))]">Edit contact</h3>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-md mx-4 rounded-[var(--radius-lg)] border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-[var(--shadow-lg)] overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-[hsl(var(--border))]">
+          <h3 className="text-[13px] font-[600] text-[hsl(var(--foreground))]">Edit contact</h3>
           <button
             onClick={onClose}
-            className="p-1 rounded-md hover:bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] transition-colors"
+            className="p-1.5 rounded-md hover:bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] transition-colors"
           >
-            <X size={14} />
+            <X size={13} />
           </button>
         </div>
         {isLoading || !contact ? (
           <div className="flex items-center justify-center py-12">
-            <Loader2 size={20} className="animate-spin text-[hsl(var(--muted-foreground))]" />
+            <Loader2 size={18} className="animate-spin text-[hsl(var(--muted-foreground))]" />
           </div>
         ) : (
           <ContactInfoForm key={`${contact.id}-${open}`} contact={contact} isEditing={true} onSaved={onClose} />
@@ -247,9 +244,6 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
       );
       markAsRead.mutate(conversationId);
     },
-    // markAsRead.mutate is stable across renders (TanStack Query guarantees this),
-    // but ESLint can't verify that — suppress rather than add markAsRead which
-    // would cause infinite re-subscription loops.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [conversationId, tenantId, queryClient, conversation?.sessionId],
   );
@@ -433,8 +427,11 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
       : conversation.phoneNumber
     : '';
 
+  const avatarInitial = displayName?.charAt(0)?.toUpperCase() ?? '?';
+  const avatarColor = getAvatarColor(avatarInitial);
+
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full bg-[hsl(var(--background))]">
       <SaveContactModal
         key={saveModalOpen ? conversationId : 'closed'}
         open={saveModalOpen}
@@ -457,87 +454,112 @@ export default function ThreadView({ conversationId, onBack }: ThreadViewProps) 
       )}
 
       {/* ── Header ── */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-[hsl(var(--border))] bg-[hsl(var(--background))] shrink-0">
+      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-[hsl(var(--border))] bg-[hsl(var(--card))] shrink-0 shadow-[var(--shadow-sm)]">
         {onBack && (
           <button
             onClick={onBack}
-            className="p-1.5 rounded-lg hover:bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] transition-colors"
+            className="p-1.5 rounded-[var(--radius-sm)] hover:bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] transition-colors shrink-0"
             aria-label="Back"
           >
-            <ArrowLeft size={18} />
+            <ArrowLeft size={16} />
           </button>
         )}
-        <div className="h-9 w-9 rounded-full bg-[hsl(var(--green))] flex items-center justify-center text-white text-sm font-semibold uppercase shrink-0">
-          {displayName?.charAt(0) ?? '?'}
+
+        {/* Avatar — same color as ConversationItem */}
+        <div
+          className={`h-9 w-9 rounded-full ${avatarColor.bg} ${avatarColor.text} ring-2 ${avatarColor.ring} ring-offset-1 ring-offset-[hsl(var(--card))] flex items-center justify-center text-[13px] font-[700] uppercase shrink-0`}
+        >
+          {avatarInitial !== '?' ? avatarInitial : '?'}
         </div>
+
+        {/* Name + session */}
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-[hsl(var(--foreground))] truncate">{displayName ?? 'Loading…'}</p>
+          <p className="text-[14px] font-[600] text-[hsl(var(--foreground))] truncate leading-tight">
+            {displayName ?? 'Loading…'}
+          </p>
           {conversation?.session && (
-            <p className="text-xs text-[hsl(var(--muted-foreground))] truncate">via {conversation.session.name}</p>
+            <p className="text-[11px] text-[hsl(var(--muted-foreground))] truncate leading-tight mt-0.5">
+              via {conversation.session.name}
+            </p>
           )}
         </div>
 
-        {/* Edit contact — shown when a contact is linked */}
-        {hasContact && contactId && (
-          <button
-            onClick={() => setEditModalOpen(true)}
-            title="Edit contact"
-            className="p-2 rounded-lg hover:bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--green))] transition-colors"
-          >
-            <Pencil size={16} />
-          </button>
-        )}
+        {/* Action buttons */}
+        <div className="flex items-center gap-1 shrink-0">
+          {hasContact && contactId && (
+            <button
+              onClick={() => setEditModalOpen(true)}
+              title="Edit contact"
+              className="p-2 rounded-[var(--radius-sm)] hover:bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--green))] transition-colors"
+            >
+              <Pencil size={15} />
+            </button>
+          )}
 
-        {/* Save as Contact — shown when no contact is linked */}
-        {!hasContact && (
-          <button
-            onClick={() => setSaveModalOpen(true)}
-            disabled={createFromConversation.isPending || isSavingName}
-            title="Save as contact"
-            className="p-2 rounded-lg hover:bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--green))] transition-colors disabled:opacity-50"
-          >
-            {createFromConversation.isPending || isSavingName ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <UserPlus size={16} />
-            )}
-          </button>
-        )}
+          {!hasContact && (
+            <button
+              onClick={() => setSaveModalOpen(true)}
+              disabled={createFromConversation.isPending || isSavingName}
+              title="Save as contact"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-[var(--radius-sm)] text-[11px] font-[600] bg-[hsl(var(--green-subtle))] text-[hsl(var(--green))] hover:bg-[hsl(var(--green))]/20 transition-colors disabled:opacity-50"
+            >
+              {createFromConversation.isPending || isSavingName ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <UserPlus size={13} />
+              )}
+              Save
+            </button>
+          )}
 
-        {hasContact && isSavedForCurrentConv && (
-          <div className="p-2 text-[hsl(var(--green))]" title="Contact saved">
-            <Check size={16} />
-          </div>
-        )}
+          {hasContact && isSavedForCurrentConv && (
+            <div className="flex items-center gap-1 px-2.5 py-1.5 rounded-[var(--radius-sm)] bg-[hsl(var(--green-subtle))] text-[hsl(var(--green))]">
+              <Check size={13} />
+              <span className="text-[11px] font-[600]">Saved</span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── Messages ── */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-1">
         {hasOlderMessages && (
-          <div className="flex justify-center pb-2">
+          <div className="flex justify-center pb-3">
             <button
               onClick={handleLoadOlder}
               disabled={isFetchingOlderMessages}
-              className="text-xs text-[hsl(var(--green))] hover:underline disabled:opacity-50 flex items-center gap-1"
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-[11px] font-[500] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--green))] hover:border-[hsl(var(--green))]/40 hover:bg-[hsl(var(--green-subtle))] transition-colors shadow-[var(--shadow-sm)] disabled:opacity-50"
             >
               {isFetchingOlderMessages ? (
                 <>
-                  <Loader2 size={12} className="animate-spin" /> Loading…
+                  <Loader2 size={11} className="animate-spin" />
+                  Loading…
                 </>
               ) : (
-                'Load earlier messages'
+                <>
+                  <ChevronUp size={11} />
+                  Load earlier messages
+                </>
               )}
             </button>
           </div>
         )}
+
         {isLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 size={20} className="animate-spin text-[hsl(var(--muted-foreground))]" />
+          <div className="flex items-center justify-center py-16">
+            <Loader2 size={18} className="animate-spin text-[hsl(var(--muted-foreground))]" />
           </div>
         ) : messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 gap-2">
-            <p className="text-sm text-[hsl(var(--muted-foreground))]">No messages yet</p>
-            <p className="text-xs text-[hsl(var(--muted-foreground))]">Send a message to start the conversation</p>
+          <div className="flex flex-col items-center justify-center py-16 gap-3">
+            <div className="h-14 w-14 rounded-2xl bg-[hsl(var(--green-subtle))] flex items-center justify-center">
+              <MessageSquare size={22} className="text-[hsl(var(--green))]" />
+            </div>
+            <div className="text-center space-y-1">
+              <p className="text-[13px] font-[600] text-[hsl(var(--foreground))]">No messages yet</p>
+              <p className="text-[12px] text-[hsl(var(--muted-foreground))]">
+                Send a message to start the conversation
+              </p>
+            </div>
           </div>
         ) : (
           messages.map((msg: Message) => (

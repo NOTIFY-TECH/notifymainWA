@@ -241,11 +241,15 @@ export class MessagesService {
     }
 
     // 7. Log message to DB with status PENDING (using interpolated text as body)
+    // UPDATED (RBAC hierarchy feature) — sentByUserId now recorded, using
+    // the userId param this method already received but never persisted.
+    // Powers the Manager "agent performance" tab's messages-sent count.
     const message = await this.prisma.message.create({
       data: {
         tenantId,
         sessionId: session.id,
         conversationId,
+        sentByUserId: userId,
         direction: 'OUTBOUND',
         fromNumber: session.phoneNumber ?? '',
         toNumber: dto.to,

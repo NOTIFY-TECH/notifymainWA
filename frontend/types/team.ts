@@ -5,7 +5,7 @@ import { UserRole } from '@/types/auth';
 export type { UserRole };
 
 // Roles that can be assigned when inviting a new member
-export const INVITABLE_ROLES: UserRole[] = ['TENANT_ADMIN', 'AGENT', 'VIEWER'];
+export const INVITABLE_ROLES: UserRole[] = ['TENANT_ADMIN', 'AGENT'];
 
 // Human-readable labels for display
 export const ROLE_LABELS: Record<UserRole, string> = {
@@ -14,8 +14,6 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   TENANT_ADMIN: 'Admin',
   MANAGER: 'Manager',
   AGENT: 'Agent',
-  VIEWER: 'Viewer',
-  API_USER: 'API User',
 };
 
 // ─── Member ───────────────────────────────────────────────────────────────────

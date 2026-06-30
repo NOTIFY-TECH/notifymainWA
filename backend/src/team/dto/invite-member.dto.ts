@@ -4,11 +4,7 @@ import { UserRole } from '@prisma/client';
 
 // Roles that can be assigned via invite — SUPER_ADMIN and TENANT_OWNER
 // cannot be granted through the invite flow.
-export const INVITABLE_ROLES = [
-  UserRole.TENANT_ADMIN,
-  UserRole.AGENT,
-  UserRole.VIEWER,
-] as const;
+export const INVITABLE_ROLES = [UserRole.TENANT_ADMIN, UserRole.AGENT] as const;
 
 export type InvitableRole = (typeof INVITABLE_ROLES)[number];
 

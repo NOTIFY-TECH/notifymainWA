@@ -7,9 +7,8 @@ import { ListContactsParams } from '@/services/contacts-api';
 import ContactList from '@/components/contacts/ContactList';
 import AddContactModal from '@/components/contacts/AddContactModal';
 import ImportContactsModal from '@/components/contacts/ImportContactsModal';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Search, Plus, Upload, X } from 'lucide-react';
+import { Search, Plus, Upload, X, Users } from 'lucide-react';
 import { useDebounce } from '@/hooks/useDebounce';
 import { cn } from '@/lib/utils';
 
@@ -22,9 +21,9 @@ function TagChip({ label, active, onClick }: { label: string; active: boolean; o
     <button
       onClick={onClick}
       className={cn(
-        'inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium border transition-colors',
+        'inline-flex items-center gap-1 px-3 py-1 rounded-full text-[11px] font-[600] border transition-colors',
         active
-          ? 'bg-[hsl(var(--green-dim))] border-[hsl(var(--green)/0.3)] text-[hsl(var(--green))]'
+          ? 'bg-emerald-50 border-emerald-200 text-emerald-600'
           : 'bg-transparent border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:border-[hsl(var(--foreground)/0.2)]',
       )}
     >
@@ -75,14 +74,19 @@ export default function ContactsPage() {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-5">
       {/* ── Header ── */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-xs font-medium uppercase tracking-widest text-[hsl(var(--muted-foreground))] mb-1">CRM</p>
-          <h1 className="text-2xl font-bold tracking-tight text-[hsl(var(--foreground))]">Contacts</h1>
+          <p className="text-[11px] font-[600] uppercase tracking-[0.1em] text-[hsl(var(--muted-foreground))]">CRM</p>
+          <div className="flex items-center gap-2.5 mt-0.5">
+            <div className="h-8 w-8 rounded-lg bg-emerald-50 flex items-center justify-center shrink-0">
+              <Users size={15} className="text-emerald-500" />
+            </div>
+            <h1 className="text-[20px] font-[700] tracking-tight text-[hsl(var(--foreground))]">Contacts</h1>
+          </div>
           {meta && (
-            <p className="text-sm text-[hsl(var(--muted-foreground))] mt-1">
+            <p className="text-[12px] text-[hsl(var(--muted-foreground))] mt-1">
               {meta.total.toLocaleString()} {meta.total === 1 ? 'contact' : 'contacts'}
             </p>
           )}
@@ -90,16 +94,16 @@ export default function ContactsPage() {
         <div className="flex items-center gap-2 pt-1">
           <button
             onClick={() => setImportOpen(true)}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-[var(--radius)] border border-[hsl(var(--border))] text-sm text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))] transition-colors font-medium"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-[var(--radius)] border border-[hsl(var(--border))] text-[12px] font-[500] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))] transition-colors"
           >
             <Upload size={14} />
             Import CSV
           </button>
           <button
             onClick={() => setAddOpen(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-[var(--radius)] bg-[hsl(var(--green-dim))] border border-[hsl(var(--green)/0.25)] text-sm text-[hsl(var(--green))] hover:bg-[hsl(var(--green)/0.2)] transition-colors font-medium"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-[var(--radius)] bg-emerald-500 text-white text-[12px] font-[600] hover:opacity-90 transition-opacity shadow-sm"
           >
-            <Plus size={15} />
+            <Plus size={14} />
             Add contact
           </button>
         </div>
@@ -108,12 +112,15 @@ export default function ContactsPage() {
       {/* ── Search + filters ── */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[hsl(var(--muted-foreground))]" />
-          <Input
+          <Search
+            size={13}
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[hsl(var(--muted-foreground))]"
+          />
+          <input
             placeholder="Search by name, phone, or email…"
             value={search}
             onChange={handleSearchChange}
-            className="pl-9 h-9 text-sm"
+            className="w-full h-9 pl-8 pr-3 rounded-[var(--radius-sm)] bg-[hsl(var(--muted))] border border-[hsl(var(--border))] text-[13px] text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-1 focus:ring-emerald-400/40 focus:border-emerald-400/60 transition-colors"
           />
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -134,7 +141,7 @@ export default function ContactsPage() {
 
       {/* ── Pagination ── */}
       {meta && meta.totalPages > 1 && (
-        <div className="flex items-center justify-between text-xs text-[hsl(var(--muted-foreground))] pt-2">
+        <div className="flex items-center justify-between text-[11px] text-[hsl(var(--muted-foreground))] pt-2">
           <span>
             Page {meta.page} of {meta.totalPages}
           </span>

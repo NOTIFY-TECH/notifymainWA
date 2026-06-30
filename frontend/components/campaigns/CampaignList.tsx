@@ -23,7 +23,7 @@ export default function CampaignList({
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-16">
-        <Loader2 size={20} className="animate-spin text-[hsl(var(--muted-foreground))]" />
+        <Loader2 size={18} className="animate-spin text-[hsl(var(--muted-foreground))]" />
       </div>
     );
   }
@@ -45,7 +45,7 @@ export default function CampaignList({
   }
 
   return (
-    <div className="flex flex-col gap-2.5">
+    <div className="flex flex-col gap-3">
       {campaigns.map(c => (
         <CampaignCard key={c.id} campaign={c} onClick={() => onCampaignClick(c.id)} />
       ))}

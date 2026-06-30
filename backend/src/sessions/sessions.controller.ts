@@ -45,23 +45,13 @@ export class SessionsController {
   }
 
   @Get()
-  @Roles(
-    UserRole.TENANT_OWNER,
-    UserRole.TENANT_ADMIN,
-    UserRole.AGENT,
-    UserRole.VIEWER,
-  )
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   async listSessions(@Param('tenantId') tenantId: string) {
     return this.sessionsService.listSessions(tenantId);
   }
 
   @Get(':sessionId/qr')
-  @Roles(
-    UserRole.TENANT_OWNER,
-    UserRole.TENANT_ADMIN,
-    UserRole.AGENT,
-    UserRole.VIEWER,
-  )
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   async getQrCode(
     @Param('tenantId') tenantId: string,
     @Param('sessionId') sessionId: string,
@@ -70,12 +60,7 @@ export class SessionsController {
   }
 
   @Get(':sessionId/status')
-  @Roles(
-    UserRole.TENANT_OWNER,
-    UserRole.TENANT_ADMIN,
-    UserRole.AGENT,
-    UserRole.VIEWER,
-  )
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   async getStatus(
     @Param('tenantId') tenantId: string,
     @Param('sessionId') sessionId: string,

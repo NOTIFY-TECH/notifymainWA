@@ -25,7 +25,6 @@ const ROLE_COLORS: Partial<Record<UserRole, string>> = {
   TENANT_ADMIN: 'bg-[hsl(var(--green))]/12 text-[hsl(var(--green))]',
   MANAGER: 'bg-blue-500/12 text-blue-400',
   AGENT: 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]',
-  VIEWER: 'bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))]',
 };
 
 function RoleBadge({ role }: { role: UserRole }) {
@@ -103,7 +102,6 @@ function InviteMemberModal({ open, onOpenChange }: { open: boolean; onOpenChange
             <p className="text-[11px] text-[hsl(var(--muted-foreground))]">
               {role === 'TENANT_ADMIN' && 'Can manage sessions, campaigns, and team members.'}
               {role === 'AGENT' && 'Can view and reply in the inbox. Cannot manage settings.'}
-              {role === 'VIEWER' && 'Read-only access to conversations and analytics.'}
             </p>
           </div>
 
@@ -176,10 +174,10 @@ function RoleSelect({
 }
 
 // ─── Access-denied state (Session 26) ─────────────────────────────────────────
-// Agents and Viewers no longer have visibility into the team roster. The
-// backend route is now guarded too (TeamController.listMembers — Owner/Admin
-// only), so this is purely a UX nicety: avoids a flash of a failed query /
-// 403 toast and instead explains why the page is empty for these roles.
+// Agents no longer have visibility into the team roster. The backend route
+// is now guarded too (TeamController.listMembers — Owner/Admin only), so
+// this is purely a UX nicety: avoids a flash of a failed query / 403 toast
+// and instead explains why the page is empty for these roles.
 
 function TeamAccessDenied() {
   return (
@@ -205,8 +203,8 @@ export default function TeamPage() {
   const isOwner = currentUser?.role === 'TENANT_OWNER';
   const isAdminOrOwner = isOwner || currentUser?.role === 'TENANT_ADMIN';
 
-  // Session 26: gate the whole page for Agent/Viewer before any team data
-  // hooks run, so we never even attempt the now-restricted listMembers call.
+  // Session 26: gate the whole page for Agent before any team data hooks
+  // run, so we never even attempt the now-restricted listMembers call.
   if (!isAdminOrOwner) {
     return <TeamAccessDenied />;
   }
@@ -453,7 +451,7 @@ function TeamPageContent({
         <p className="text-[11px] text-[hsl(var(--muted-foreground))] leading-relaxed">
           <span className="font-medium text-[hsl(var(--foreground))]">Owner</span> can change roles and manage all
           members. <span className="font-medium text-[hsl(var(--foreground))]">Admins</span> can invite and remove
-          agents/viewers. Role changes take effect immediately.
+          agents. Role changes take effect immediately.
         </p>
       </div>
 

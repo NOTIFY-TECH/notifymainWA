@@ -26,20 +26,25 @@ export function SessionCard({ session, onQrOpen, onDelete, onReconnect, onUnlink
 
   return (
     <>
-      <div className="glass rounded-xl p-4 flex flex-col gap-3 group hover:border-[hsl(var(--border))] transition-colors relative">
-        {/* top row */}
+      <div className="group relative flex flex-col gap-3 rounded-[var(--radius-lg)] bg-[hsl(var(--card))] border border-[hsl(var(--border))] shadow-[var(--shadow-sm)] p-4 hover:shadow-[var(--shadow-md)] hover:border-[hsl(var(--border))] transition-all duration-150">
+        {/* ── Top row: icon + name + badge ── */}
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-3 min-w-0">
             <div
-              className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${isConnected ? 'bg-[#22C55E]/15' : 'bg-[hsl(var(--muted))]'}`}
+              className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 ${
+                isConnected ? 'bg-emerald-50' : 'bg-[hsl(var(--muted))]'
+              }`}
             >
               <MonitorSmartphone
-                className={`w-5 h-5 ${isConnected ? 'text-[hsl(var(--green))]' : 'text-[hsl(var(--muted-foreground))]'}`}
+                size={18}
+                className={isConnected ? 'text-emerald-500' : 'text-[hsl(var(--muted-foreground))]'}
               />
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-[hsl(var(--foreground))] truncate">{session.name}</p>
-              <p className="text-xs text-[hsl(var(--muted-foreground))] truncate">
+              <p className="text-[13px] font-[600] text-[hsl(var(--foreground))] truncate leading-tight">
+                {session.name}
+              </p>
+              <p className="text-[11.5px] text-[hsl(var(--muted-foreground))] truncate mt-0.5">
                 {session.phoneNumber ?? 'No number linked'}
               </p>
             </div>
@@ -47,116 +52,118 @@ export function SessionCard({ session, onQrOpen, onDelete, onReconnect, onUnlink
           <StatusBadge status={session.status} />
         </div>
 
-        {/* meta */}
-        <div className="grid grid-cols-2 gap-2 text-xs">
-          <div className="bg-[hsl(var(--muted))] rounded-lg px-3 py-2">
-            <p className="text-[hsl(var(--muted-foreground))] mb-0.5">Messages</p>
-            <p className="text-[hsl(var(--foreground))] font-medium">{(session.messagesSent ?? 0).toLocaleString()}</p>
+        {/* ── Meta stats ── */}
+        <div className="grid grid-cols-2 gap-2">
+          <div className="rounded-lg bg-[hsl(var(--muted))] px-3 py-2">
+            <p className="text-[10.5px] text-[hsl(var(--muted-foreground))] mb-0.5">Messages</p>
+            <p className="text-[13px] font-[600] text-[hsl(var(--foreground))]">
+              {(session.messagesSent ?? 0).toLocaleString()}
+            </p>
           </div>
-          <div className="bg-[hsl(var(--muted))] rounded-lg px-3 py-2">
-            <p className="text-[hsl(var(--muted-foreground))] mb-0.5">Last active</p>
-            <p className="text-[hsl(var(--foreground))] font-medium truncate">
+          <div className="rounded-lg bg-[hsl(var(--muted))] px-3 py-2">
+            <p className="text-[10.5px] text-[hsl(var(--muted-foreground))] mb-0.5">Last active</p>
+            <p className="text-[13px] font-[600] text-[hsl(var(--foreground))] truncate">
               {session.lastSeenAt ? formatDistanceToNow(new Date(session.lastSeenAt), { addSuffix: true }) : '—'}
             </p>
           </div>
         </div>
 
-        {/* actions */}
+        {/* ── Actions ── */}
         <div className="flex gap-2 mt-auto">
-          {/* Connected state */}
+          {/* Connected */}
           {isConnected && (
             <>
-              <div className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-[#22C55E]/10 border border-[#22C55E]/20 text-xs text-[hsl(var(--green))]">
-                <CheckCircle2 className="w-3.5 h-3.5" />
+              <div className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-[12px] font-[500] text-emerald-600">
+                <CheckCircle2 size={13} />
                 Active
               </div>
               <button
                 onClick={() => setShowUnlinkWarning(true)}
-                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-[hsl(var(--border))] text-xs text-[hsl(var(--muted-foreground))] hover:text-orange-500 hover:border-orange-500/30 hover:bg-orange-500/10 transition-colors"
+                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-[hsl(var(--border))] text-[12px] text-[hsl(var(--muted-foreground))] hover:text-orange-500 hover:border-orange-200 hover:bg-orange-50 transition-colors"
                 title="Remove linked WhatsApp number"
               >
-                <Unlink className="w-3.5 h-3.5" />
+                <Unlink size={13} />
                 Remove
               </button>
             </>
           )}
 
-          {/* Disconnected state */}
+          {/* Disconnected */}
           {isDisconnected && (
             <>
               <button
                 onClick={() => onReconnect(session.id)}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-[#22C55E]/10 border border-[#22C55E]/20 text-xs text-[hsl(var(--green))] hover:bg-[#22C55E]/20 transition-colors"
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-[12px] font-[500] text-emerald-600 hover:bg-emerald-100 transition-colors"
               >
-                <RefreshCw className="w-3.5 h-3.5" />
+                <RefreshCw size={13} />
                 Reconnect
               </button>
               <button
                 onClick={() => onQrOpen(session.id, session.name)}
-                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-[#A855F7]/15 border border-[#A855F7]/25 text-xs text-purple-600 dark:text-purple-400 hover:bg-[#A855F7]/25 transition-colors"
+                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-violet-50 border border-violet-200 text-[12px] text-violet-600 hover:bg-violet-100 transition-colors"
                 title="Scan new QR code"
               >
-                <QrCode className="w-3.5 h-3.5" />
+                <QrCode size={13} />
               </button>
             </>
           )}
 
-          {/* QR waiting / initializing state */}
+          {/* QR waiting */}
           {canScanQr && (
             <button
               onClick={() => onQrOpen(session.id, session.name)}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-[#A855F7]/15 border border-[#A855F7]/25 text-xs text-purple-600 dark:text-purple-400 hover:bg-[#A855F7]/25 transition-colors"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-violet-50 border border-violet-200 text-[12px] font-[500] text-violet-600 hover:bg-violet-100 transition-colors"
             >
-              <QrCode className="w-3.5 h-3.5" />
+              <QrCode size={13} />
               Scan QR
             </button>
           )}
 
-          {/* Delete — always visible on hover */}
+          {/* Delete — appears on hover */}
           <button
             onClick={() => onDelete(session)}
-            className="p-2 rounded-lg border border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:text-red-500 hover:border-red-500/30 hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100"
+            className="p-2 rounded-lg border border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:text-red-500 hover:border-red-200 hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100"
             aria-label="Delete session"
           >
-            <Trash2 className="w-3.5 h-3.5" />
+            <Trash2 size={13} />
           </button>
         </div>
       </div>
 
-      {/* Unlink warning modal */}
+      {/* ── Unlink warning modal ── */}
       {showUnlinkWarning && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-xl p-6 w-full max-w-sm shadow-xl">
-            <div className="flex items-start gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-orange-500/15 flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-5 h-5 text-orange-500" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="bg-[hsl(var(--card))] border border-[hsl(var(--border))] rounded-[var(--radius-lg)] p-6 w-full max-w-sm shadow-[var(--shadow-lg)]">
+            <div className="flex items-start gap-3 mb-5">
+              <div className="h-10 w-10 rounded-xl bg-orange-50 border border-orange-100 flex items-center justify-center shrink-0">
+                <AlertTriangle size={18} className="text-orange-500" />
               </div>
-              <div>
-                <h3 className="text-sm font-semibold text-[hsl(var(--foreground))]">Remove WhatsApp number?</h3>
-                <p className="text-xs text-[hsl(var(--muted-foreground))] mt-1">
+              <div className="flex-1 min-w-0">
+                <h3 className="text-[13.5px] font-[600] text-[hsl(var(--foreground))]">Remove WhatsApp number?</h3>
+                <p className="text-[12px] text-[hsl(var(--muted-foreground))] mt-1 leading-relaxed">
                   This will disconnect{' '}
-                  <span className="font-medium text-[hsl(var(--foreground))]">{session.phoneNumber}</span> from{' '}
-                  <span className="font-medium text-[hsl(var(--foreground))]">{session.name}</span>. You&apos;ll need to
-                  scan a new QR code to link a different number.
+                  <span className="font-[500] text-[hsl(var(--foreground))]">{session.phoneNumber}</span> from{' '}
+                  <span className="font-[500] text-[hsl(var(--foreground))]">{session.name}</span>. You'll need to scan
+                  a new QR code to link a different number.
                 </p>
               </div>
               <button
                 onClick={() => setShowUnlinkWarning(false)}
-                className="p-1 rounded-lg hover:bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] shrink-0"
+                className="p-1 rounded-lg hover:bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] shrink-0 transition-colors"
               >
-                <X className="w-4 h-4" />
+                <X size={15} />
               </button>
             </div>
             <div className="flex gap-2">
               <button
                 onClick={() => setShowUnlinkWarning(false)}
-                className="flex-1 py-2 rounded-lg border border-[hsl(var(--border))] text-xs text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] transition-colors"
+                className="flex-1 py-2 rounded-lg border border-[hsl(var(--border))] text-[12px] font-[500] text-[hsl(var(--muted-foreground))] hover:bg-[hsl(var(--muted))] transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleUnlinkConfirm}
-                className="flex-1 py-2 rounded-lg bg-orange-500/15 border border-orange-500/30 text-xs text-orange-500 hover:bg-orange-500/25 transition-colors font-medium"
+                className="flex-1 py-2 rounded-lg bg-orange-50 border border-orange-200 text-[12px] font-[500] text-orange-600 hover:bg-orange-100 transition-colors"
               >
                 Yes, remove number
               </button>

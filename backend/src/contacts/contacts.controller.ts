@@ -38,12 +38,7 @@ export class ContactsController {
   constructor(private readonly contactsService: ContactsService) {}
 
   @Get()
-  @Roles(
-    UserRole.TENANT_OWNER,
-    UserRole.TENANT_ADMIN,
-    UserRole.AGENT,
-    UserRole.VIEWER,
-  )
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   listContacts(
     @Param('tenantId') tenantId: string,
     @Query() query: ListContactsDto,
@@ -90,23 +85,13 @@ export class ContactsController {
 
   // ── Must also be before :contactId — otherwise "tags" is captured as a contactId ──
   @Get('tags')
-  @Roles(
-    UserRole.TENANT_OWNER,
-    UserRole.TENANT_ADMIN,
-    UserRole.AGENT,
-    UserRole.VIEWER,
-  )
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   listDistinctTags(@Param('tenantId') tenantId: string) {
     return this.contactsService.listDistinctTags(tenantId);
   }
 
   @Get(':contactId')
-  @Roles(
-    UserRole.TENANT_OWNER,
-    UserRole.TENANT_ADMIN,
-    UserRole.AGENT,
-    UserRole.VIEWER,
-  )
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
   getContact(
     @Param('tenantId') tenantId: string,
     @Param('contactId') contactId: string,

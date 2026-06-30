@@ -18,6 +18,7 @@ import { TeamService } from './team.service';
 import { InviteMemberDto } from './dto/invite-member.dto';
 import { AcceptInviteDto } from './dto/accept-invite.dto';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
+import { UpdateMemberManagerDto } from './dto/update-member-manager.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { TenantGuard } from '../common/guards/tenant.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -37,8 +38,8 @@ export class TeamController {
   // ── Authenticated team routes, scoped to tenant ──────────────────────────
 
   // GET /tenants/:tenantId/team
-  // Session 26: restricted to Owner/Admin — Agents and Viewers no longer
-  // need (or should have) visibility into the team roster.
+  // Session 26: restricted to Owner/Admin — Agents no longer need (or
+  // should have) visibility into the team roster.
   @Get('tenants/:tenantId/team')
   @ApiBearerAuth()
   @ApiOperation({
@@ -111,6 +112,55 @@ export class TeamController {
     @Req() req: any,
   ) {
     return this.teamService.updateMemberRole(
+      tenantId,
+      req.user.userId,
+      userId,
+      dto,
+    );
+  }
+
+  // GET /tenants/:tenantId/team/my-agents/performance
+  // NEW (RBAC hierarchy feature) — Manager-only. Auto-scoped to the caller's
+  // own team via req.user.userId — there is no tenantId+managerId param
+  // combination that lets a Manager view another Manager's team through
+  // this route; the service only ever queries managerId = caller.
+  //
+  // Declared BEFORE ':userId/role' and ':userId/manager' below would not
+  // conflict here since 'my-agents' sits under a different path segment
+  // ('team/my-agents/performance' vs 'team/:userId/...'), but kept grouped
+  // with the other team-roster routes for readability.
+  @Get('tenants/:tenantId/team/my-agents/performance')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary:
+      "Per-agent performance stats for the caller's own team — manager only",
+  })
+  @UseGuards(JwtAuthGuard, TenantGuard, RolesGuard)
+  @Roles(UserRole.MANAGER)
+  getMyAgentsPerformance(@Param('tenantId') tenantId: string, @Req() req: any) {
+    return this.teamService.getMyAgentsPerformance(tenantId, req.user.userId);
+  }
+
+  // PATCH /tenants/:tenantId/team/:userId/manager
+  // NEW (RBAC hierarchy feature) — assign/change/clear which Manager an
+  // Agent reports to. Owner/Admin only — Managers cannot reassign their own
+  // team via this route (matches @Roles list on .../role above, but
+  // deliberately includes TENANT_ADMIN here since this isn't a destructive
+  // ownership-transfer action like role changes are restricted to owner-only).
+  @Patch('tenants/:tenantId/team/:userId/manager')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: "Assign, change, or clear an agent's manager — owner/admin only",
+  })
+  @UseGuards(JwtAuthGuard, TenantGuard, RolesGuard)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN)
+  updateMemberManager(
+    @Param('tenantId') tenantId: string,
+    @Param('userId') userId: string,
+    @Body() dto: UpdateMemberManagerDto,
+    @Req() req: any,
+  ) {
+    return this.teamService.setMemberManager(
       tenantId,
       req.user.userId,
       userId,

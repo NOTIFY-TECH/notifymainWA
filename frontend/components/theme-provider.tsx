@@ -10,22 +10,26 @@ interface ThemeContextValue {
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
-  theme: 'dark',
+  theme: 'light',
   toggleTheme: () => {},
 });
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
-    if (typeof window === 'undefined') return 'dark';
-    return (localStorage.getItem('theme') as Theme) ?? 'dark';
+    if (typeof window === 'undefined') return 'light';
+    // Support old localStorage value 'dark' / 'light'
+    const saved = localStorage.getItem('theme') as Theme | null;
+    return saved ?? 'light';
   });
 
   useEffect(() => {
     const root = document.documentElement;
-    if (theme === 'light') {
-      root.classList.add('light');
-    } else {
+    if (theme === 'dark') {
+      root.classList.add('dark');
       root.classList.remove('light');
+    } else {
+      root.classList.remove('dark');
+      root.classList.add('light');
     }
     localStorage.setItem('theme', theme);
   }, [theme]);

@@ -7,7 +7,7 @@ import { ListCampaignsParams, CampaignStatus } from '@/types/campaign';
 import CampaignList from '@/components/campaigns/CampaignList';
 import { Button } from '@/components/ui/button';
 import { FilterBar, FilterChip } from '@/components/ui/filter-bar';
-import { Plus } from 'lucide-react';
+import { Plus, Megaphone } from 'lucide-react';
 import { useDebounce } from '@/hooks/useDebounce';
 
 // ─── Filter config ────────────────────────────────────────────────────────────
@@ -52,26 +52,32 @@ export default function CampaignsPage() {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-5">
       {/* ── Header ── */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-xs font-medium uppercase tracking-widest text-[hsl(var(--muted-foreground))] mb-1">
+          <p className="text-[11px] font-[600] uppercase tracking-[0.1em] text-[hsl(var(--muted-foreground))]">
             Marketing
           </p>
-          <h1 className="text-2xl font-bold tracking-tight text-[hsl(var(--foreground))]">Campaigns</h1>
+          <div className="flex items-center gap-2.5 mt-0.5">
+            <div className="h-8 w-8 rounded-lg bg-violet-50 flex items-center justify-center shrink-0">
+              <Megaphone size={15} className="text-violet-500" />
+            </div>
+            <h1 className="text-[20px] font-[700] tracking-tight text-[hsl(var(--foreground))]">Campaigns</h1>
+          </div>
           {meta && (
-            <p className="text-sm text-[hsl(var(--muted-foreground))] mt-1">
+            <p className="text-[12px] text-[hsl(var(--muted-foreground))] mt-1">
               {meta.total.toLocaleString()} {meta.total === 1 ? 'campaign' : 'campaigns'}
             </p>
           )}
         </div>
+
         <div className="pt-1">
           <button
             onClick={() => router.push('/dashboard/campaigns/new')}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-[var(--radius)] bg-[hsl(var(--purple-dim))] border border-[hsl(var(--purple)/0.25)] text-sm text-[hsl(var(--purple))] hover:bg-[hsl(var(--purple)/0.2)] transition-colors font-medium"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-[var(--radius)] bg-[hsl(var(--purple))] text-white text-[12px] font-[600] hover:opacity-90 transition-opacity shadow-sm"
           >
-            <Plus size={15} />
+            <Plus size={14} />
             New campaign
           </button>
         </div>
@@ -98,7 +104,7 @@ export default function CampaignsPage() {
 
       {/* ── Pagination ── */}
       {meta && meta.totalPages > 1 && (
-        <div className="flex items-center justify-between text-xs text-[hsl(var(--muted-foreground))] pt-2">
+        <div className="flex items-center justify-between text-[11px] text-[hsl(var(--muted-foreground))] pt-2">
           <span>
             Page {meta.page} of {meta.totalPages}
           </span>

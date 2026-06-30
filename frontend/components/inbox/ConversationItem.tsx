@@ -11,6 +11,22 @@ import {
   useUnarchiveConversation,
 } from '@/hooks/useConversations';
 
+// ── Avatar color palette — mirrors dashboard icon chip tints ─────────────────
+// Each letter maps to one of 6 tinted color slots (bg + text).
+const AVATAR_COLORS = [
+  { bg: 'bg-blue-50',    ring: 'ring-blue-200',    text: 'text-blue-600',    activeBg: 'bg-blue-100'    },
+  { bg: 'bg-violet-50',  ring: 'ring-violet-200',  text: 'text-violet-600',  activeBg: 'bg-violet-100'  },
+  { bg: 'bg-amber-50',   ring: 'ring-amber-200',   text: 'text-amber-600',   activeBg: 'bg-amber-100'   },
+  { bg: 'bg-emerald-50', ring: 'ring-emerald-200', text: 'text-emerald-600', activeBg: 'bg-emerald-100' },
+  { bg: 'bg-rose-50',    ring: 'ring-rose-200',    text: 'text-rose-600',    activeBg: 'bg-rose-100'    },
+  { bg: 'bg-cyan-50',    ring: 'ring-cyan-200',    text: 'text-cyan-600',    activeBg: 'bg-cyan-100'    },
+];
+
+export function getAvatarColor(char: string) {
+  const code = (char ?? 'A').toUpperCase().charCodeAt(0);
+  return AVATAR_COLORS[code % AVATAR_COLORS.length];
+}
+
 interface ConversationItemProps {
   conversation: Conversation;
   isActive: boolean;
@@ -42,96 +58,93 @@ export default function ConversationItem({ conversation, isActive, onClick }: Co
   const handlePinToggle = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (isPinning || isUnpinning) return;
-    if (isPinned) {
-      unpin(conversation.id);
-    } else {
-      pin(conversation.id);
-    }
+    isPinned ? unpin(conversation.id) : pin(conversation.id);
   };
 
   const handleArchiveToggle = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (isArchiving || isUnarchiving) return;
-    if (isArchived) {
-      unarchive(conversation.id);
-    } else {
-      archive(conversation.id);
-    }
+    isArchived ? unarchive(conversation.id) : archive(conversation.id);
   };
+
+  const initials = displayName?.charAt(0)?.toUpperCase() ?? '?';
+  const color = getAvatarColor(initials);
 
   return (
     <div
       role="button"
       tabIndex={0}
       onClick={onClick}
-      onKeyDown={e => {
-        if (e.key === 'Enter' || e.key === ' ') onClick();
-      }}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') onClick(); }}
       className={cn(
-        'group w-full text-left px-4 py-3 flex items-start gap-3 cursor-pointer',
+        'group w-full text-left px-3 py-2.5 flex items-start gap-3 cursor-pointer select-none',
         'border-b border-[hsl(var(--border))]',
         'transition-colors duration-100',
-        isActive ? 'bg-[hsl(var(--green))]/8 border-l-2 border-l-[hsl(var(--green))]' : 'hover:bg-[hsl(var(--muted))]',
+        isActive
+          ? 'bg-[hsl(var(--green-subtle))] border-l-[3px] border-l-[hsl(var(--green))] pl-[9px]'
+          : 'hover:bg-[hsl(var(--muted))] border-l-[3px] border-l-transparent',
       )}
     >
-      {/* Avatar */}
+      {/* ── Avatar ── */}
       <div
         className={cn(
-          'flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold uppercase',
+          'flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[13px] font-[700] uppercase transition-all mt-0.5',
           isActive
-            ? 'bg-[hsl(var(--green))]/20 text-[hsl(var(--green))]'
-            : 'bg-[hsl(var(--muted))] text-[hsl(var(--foreground))]',
+            ? `${color.activeBg} ${color.text} ring-2 ${color.ring} ring-offset-1 ring-offset-[hsl(var(--green-subtle))]`
+            : `${color.bg} ${color.text} group-hover:ring-2 group-hover:${color.ring}`,
         )}
       >
-        {displayName?.charAt(0) ?? <MessageSquare size={16} />}
+        {initials !== '?' ? initials : <MessageSquare size={14} />}
       </div>
 
-      {/* Content */}
+      {/* ── Content ── */}
       <div className="min-w-0 flex-1">
-        <div className="flex items-center justify-between gap-2 mb-0.5">
+        {/* Name + meta */}
+        <div className="flex items-center justify-between gap-1.5 mb-0.5">
           <p
             className={cn(
-              'text-sm truncate',
-              unread > 0 ? 'font-semibold text-[hsl(var(--foreground))]' : 'font-medium text-[hsl(var(--foreground))]',
+              'text-[13px] truncate flex-1',
+              unread > 0 ? 'font-[600] text-[hsl(var(--foreground))]' : 'font-[500] text-[hsl(var(--foreground))]',
             )}
           >
             {displayName}
           </p>
 
-          {/* Right side: time + unread badge + action buttons */}
           <div className="flex items-center gap-1 shrink-0">
             {lastTime && (
-              <span className="text-[10px] text-[hsl(var(--muted-foreground))]">
+              <span className={cn(
+                'text-[10px]',
+                unread > 0 ? 'text-[hsl(var(--green))] font-[600]' : 'text-[hsl(var(--muted-foreground))]',
+              )}>
                 {formatDistanceToNow(new Date(lastTime), { addSuffix: false })}
               </span>
             )}
 
             {unread > 0 && (
-              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[hsl(var(--green))] px-1 text-[10px] font-bold text-white">
+              <span className="flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[hsl(var(--green))] px-1 text-[10px] font-[700] text-white shadow-sm">
                 {unread > 99 ? '99+' : unread}
               </span>
             )}
 
-            {/* Archive toggle — shown on hover; always visible when archived */}
+            {/* Archive toggle */}
             <button
               type="button"
               onClick={handleArchiveToggle}
               disabled={isArchiving || isUnarchiving}
               title={isArchived ? 'Unarchive conversation' : 'Archive conversation'}
               className={cn(
-                'rounded p-1 transition-colors',
+                'rounded-md p-1 transition-colors',
                 isArchived
                   ? 'text-[hsl(var(--muted-foreground))] opacity-100'
                   : 'text-[hsl(var(--muted-foreground))] opacity-0 group-hover:opacity-100',
-                'hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]',
+                'hover:bg-[hsl(var(--border))] hover:text-[hsl(var(--foreground))]',
                 (isArchiving || isUnarchiving) && 'cursor-not-allowed opacity-50',
               )}
             >
-              {isArchived ? <ArchiveX size={14} /> : <Archive size={14} />}
+              {isArchived ? <ArchiveX size={13} /> : <Archive size={13} />}
             </button>
 
-            {/* Pin toggle — always visible when pinned, shown on hover otherwise */}
-            {/* Hidden when conversation is archived (archiving already unpins) */}
+            {/* Pin toggle */}
             {!isArchived && (
               <button
                 type="button"
@@ -139,28 +152,37 @@ export default function ConversationItem({ conversation, isActive, onClick }: Co
                 disabled={isPinning || isUnpinning}
                 title={isPinned ? 'Unpin conversation' : 'Pin conversation'}
                 className={cn(
-                  'rounded p-1 transition-colors',
+                  'rounded-md p-1 transition-colors',
                   isPinned
-                    ? 'text-[hsl(var(--green))] opacity-100'
+                    ? 'text-violet-500 opacity-100'
                     : 'text-[hsl(var(--muted-foreground))] opacity-0 group-hover:opacity-100',
-                  'hover:bg-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))]',
+                  'hover:bg-[hsl(var(--border))] hover:text-[hsl(var(--foreground))]',
                   (isPinning || isUnpinning) && 'cursor-not-allowed opacity-50',
                 )}
               >
-                {isPinned ? <PinOff size={15} /> : <Pin size={15} />}
+                {isPinned ? <PinOff size={13} /> : <Pin size={13} />}
               </button>
             )}
           </div>
         </div>
 
-        <p
-          className={cn(
-            'text-xs truncate',
-            unread > 0 ? 'text-[hsl(var(--foreground))]' : 'text-[hsl(var(--muted-foreground))]',
-          )}
-        >
+        {/* Last message */}
+        <p className={cn(
+          'text-[12px] truncate leading-snug',
+          unread > 0 ? 'text-[hsl(var(--foreground))] font-[500]' : 'text-[hsl(var(--muted-foreground))]',
+        )}>
           {lastText}
         </p>
+
+        {/* Pinned chip */}
+        {isPinned && !isArchived && (
+          <div className="flex items-center gap-1 mt-1">
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-violet-50 border border-violet-100">
+              <Pin size={8} className="text-violet-500" />
+              <span className="text-[9px] font-[600] text-violet-500 uppercase tracking-wide">Pinned</span>
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );

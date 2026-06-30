@@ -52,14 +52,17 @@ function RowSkeleton() {
 
 export default function ContactList({ contacts, isLoading, hasFilters, onContactClick, onAdd }: ContactListProps) {
   return (
-    <div className="rounded-xl border border-[hsl(var(--border))] overflow-hidden">
+    <div className="rounded-[var(--radius-lg)] border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-[var(--shadow-sm)] overflow-hidden">
       <table className="w-full text-left">
         <thead>
           <tr className="border-b border-[hsl(var(--border))] bg-[hsl(var(--muted))]">
             {COLUMNS.map(col => (
               <th
                 key={col.label}
-                className={cn('text-xs font-medium text-[hsl(var(--muted-foreground))]', col.className)}
+                className={cn(
+                  'text-[10px] font-[600] uppercase tracking-[0.06em] text-[hsl(var(--muted-foreground))]',
+                  col.className,
+                )}
               >
                 {col.label}
               </th>

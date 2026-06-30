@@ -28,9 +28,12 @@ export const clearAccessToken = (): void => {
 const api: AxiosInstance = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000',
   timeout: 15000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  // ⚠️  Do NOT set 'Content-Type' here.
+  // Axios auto-sets 'application/json' for plain object bodies and
+  // 'multipart/form-data; boundary=...' for FormData bodies.
+  // Hardcoding it to 'application/json' prevents FormData uploads from
+  // setting the correct multipart content-type and boundary, causing
+  // multer to receive nothing and throw "No file uploaded".
   withCredentials: true, // sends httpOnly refresh token cookie
 });
 

@@ -17,6 +17,7 @@ import { randomBytes } from 'crypto';
 import { InviteMemberDto } from './dto/invite-member.dto';
 import { AcceptInviteDto } from './dto/accept-invite.dto';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
+import { UpdateMemberManagerDto } from './dto/update-member-manager.dto';
 
 const INVITE_TTL_HOURS = 72;
 
@@ -49,6 +50,7 @@ export class TeamService {
           isActive: true,
           lastLoginAt: true,
           createdAt: true,
+          managerId: true,
         },
         orderBy: { createdAt: 'asc' },
       }),
@@ -359,7 +361,17 @@ export class TeamService {
   }
 
   // ─── Update member role ───────────────────────────────────────────────────
-
+  //
+  // UPDATED (RBAC hierarchy feature) — role changes now cascade into
+  // managerId cleanup so links never dangle:
+  //   - If the target user IS a manager (current role MANAGER) and is being
+  //     changed to anything else, every agent currently reporting to them
+  //     gets auto-unassigned (managerId set to null).
+  //   - If the target user currently HAS a manager (managerId set) and is
+  //     being changed to a role other than AGENT, their own managerId is
+  //     cleared (a non-Agent shouldn't carry a manager link).
+  // Both cleanups run inside the same transaction as the role update so
+  // there's no window where the data is inconsistent.
   async updateMemberRole(
     tenantId: string,
     actorId: string,
@@ -386,16 +398,48 @@ export class TeamService {
       }
     }
 
-    const updated = await this.prisma.user.update({
-      where: { id: targetUserId },
-      data: { role: dto.role },
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        role: true,
-      },
+    const roleChangingAway = target.role !== dto.role;
+    const wasManager = target.role === UserRole.MANAGER;
+    const newRoleIsAgent = dto.role === UserRole.AGENT;
+
+    let unassignedAgents: { id: string; email: string }[] = [];
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      // Target was a Manager and is losing that role: unassign their team.
+      if (roleChangingAway && wasManager) {
+        const agents = await tx.user.findMany({
+          where: { tenantId, managerId: targetUserId },
+          select: { id: true, email: true },
+        });
+        unassignedAgents = agents;
+
+        if (agents.length > 0) {
+          await tx.user.updateMany({
+            where: { tenantId, managerId: targetUserId },
+            data: { managerId: null },
+          });
+        }
+      }
+
+      const data: { role: UserRole; managerId?: null } = { role: dto.role };
+      // Target is changing to a non-Agent role: clear their own manager
+      // link, since only Agents are meant to carry one.
+      if (roleChangingAway && !newRoleIsAgent && target.managerId) {
+        data.managerId = null;
+      }
+
+      return tx.user.update({
+        where: { id: targetUserId },
+        data,
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          role: true,
+          managerId: true,
+        },
+      });
     });
 
     this.auditLog.log({
@@ -406,6 +450,185 @@ export class TeamService {
       entityId: targetUserId,
       before: { role: target.role },
       after: { role: dto.role },
+    });
+
+    // Side-effect audit entries — one per agent auto-unassigned as a
+    // consequence of the role change above, so "why does this agent have
+    // no manager?" traces back to this exact event instead of looking
+    // silent in the log.
+    for (const agent of unassignedAgents) {
+      this.auditLog.log({
+        tenantId,
+        userId: actorId,
+        action: AuditAction.UPDATE,
+        entityType: 'User',
+        entityId: agent.id,
+        before: { managerId: targetUserId },
+        after: { managerId: null },
+        metadata: {
+          reason: 'auto_unassigned_manager_role_change',
+          formerManagerId: targetUserId,
+        },
+      });
+    }
+
+    return { data: updated };
+  }
+
+  // ─── Manager performance tab (NEW — RBAC hierarchy feature) ──────────────
+  //
+  // Manager-only, auto-scoped to the caller's own team (managerId = caller).
+  // Per agent: messages sent (Message.sentByUserId), conversations handled
+  // (total assigned) + resolved (status RESOLVED), and campaigns created
+  // (Campaign.createdById). Response-time was explicitly descoped per
+  // project decision — not included here.
+  async getMyAgentsPerformance(tenantId: string, managerId: string) {
+    const agents = await this.prisma.user.findMany({
+      where: { tenantId, managerId, deletedAt: null },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        isActive: true,
+      },
+      orderBy: { firstName: 'asc' },
+    });
+
+    if (agents.length === 0) {
+      return { data: [] };
+    }
+
+    const agentIds = agents.map((a) => a.id);
+
+    const [messageCounts, conversationCounts, resolvedCounts, campaignCounts] =
+      await Promise.all([
+        this.prisma.message.groupBy({
+          by: ['sentByUserId'],
+          where: {
+            tenantId,
+            sentByUserId: { in: agentIds },
+            direction: 'OUTBOUND',
+          },
+          _count: { _all: true },
+        }),
+        this.prisma.conversation.groupBy({
+          by: ['assignedAgentId'],
+          where: { tenantId, assignedAgentId: { in: agentIds } },
+          _count: { _all: true },
+        }),
+        this.prisma.conversation.groupBy({
+          by: ['assignedAgentId'],
+          where: {
+            tenantId,
+            assignedAgentId: { in: agentIds },
+            status: 'RESOLVED',
+          },
+          _count: { _all: true },
+        }),
+        this.prisma.campaign.groupBy({
+          by: ['createdById'],
+          where: { tenantId, createdById: { in: agentIds } },
+          _count: { _all: true },
+        }),
+      ]);
+
+    // groupBy returns sparse results (only agents with ≥1 row appear) — map
+    // into lookups so every agent gets a 0 instead of being omitted.
+    const toMap = (
+      rows: { _count: { _all: number } }[],
+      key: 'sentByUserId' | 'assignedAgentId' | 'createdById',
+    ) => {
+      const map = new Map<string, number>();
+      rows.forEach((row: any) => {
+        if (row[key]) map.set(row[key] as string, row._count._all);
+      });
+      return map;
+    };
+
+    const messagesByAgent = toMap(messageCounts, 'sentByUserId');
+    const conversationsByAgent = toMap(conversationCounts, 'assignedAgentId');
+    const resolvedByAgent = toMap(resolvedCounts, 'assignedAgentId');
+    const campaignsByAgent = toMap(campaignCounts, 'createdById');
+
+    const data = agents.map((agent) => ({
+      id: agent.id,
+      name: `${agent.firstName} ${agent.lastName}`,
+      email: agent.email,
+      isActive: agent.isActive,
+      messagesSent: messagesByAgent.get(agent.id) ?? 0,
+      conversationsHandled: conversationsByAgent.get(agent.id) ?? 0,
+      conversationsResolved: resolvedByAgent.get(agent.id) ?? 0,
+      campaignsCreated: campaignsByAgent.get(agent.id) ?? 0,
+    }));
+
+    return { data };
+  }
+
+  // ─── Update member's manager (NEW — RBAC hierarchy feature) ──────────────
+  //
+  // Admin/Owner only (enforced at controller level). Links an Agent to a
+  // Manager, or unassigns with managerId: null. Both ends are re-verified
+  // here even though the controller guards the actor's role, because these
+  // checks are about the TARGET's and MANAGER's roles, which the role guard
+  // has no visibility into.
+  async setMemberManager(
+    tenantId: string,
+    actorId: string,
+    targetUserId: string,
+    dto: UpdateMemberManagerDto,
+  ) {
+    const target = await this.prisma.user.findFirst({
+      where: { id: targetUserId, tenantId, deletedAt: null },
+    });
+    if (!target) throw new NotFoundException('User not found.');
+
+    if (target.role !== UserRole.AGENT) {
+      throw new BadRequestException(
+        'Only agents can be assigned to a manager.',
+      );
+    }
+
+    const managerId = dto.managerId ?? null;
+
+    if (managerId) {
+      const manager = await this.prisma.user.findFirst({
+        where: {
+          id: managerId,
+          tenantId,
+          role: UserRole.MANAGER,
+          deletedAt: null,
+          isActive: true,
+        },
+      });
+      if (!manager) {
+        throw new BadRequestException(
+          'Manager not found, inactive, or does not hold the Manager role.',
+        );
+      }
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: targetUserId },
+      data: { managerId },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        managerId: true,
+      },
+    });
+
+    this.auditLog.log({
+      tenantId,
+      userId: actorId,
+      action: AuditAction.UPDATE,
+      entityType: 'User',
+      entityId: targetUserId,
+      before: { managerId: target.managerId },
+      after: { managerId },
     });
 
     return { data: updated };
@@ -427,6 +650,40 @@ export class TeamService {
       throw new ForbiddenException(
         'Cannot remove a tenant owner. Transfer ownership first.',
       );
+    }
+
+    // Removing a Manager: unassign their agents first so nothing dangles.
+    // Decision: removal proceeds immediately (Option A) rather than being
+    // blocked until the Admin manually reassigns the team — each affected
+    // agent gets its own audit entry below so the unassignment is traceable.
+    if (target.role === UserRole.MANAGER) {
+      const agents = await this.prisma.user.findMany({
+        where: { tenantId, managerId: targetUserId },
+        select: { id: true, email: true },
+      });
+
+      if (agents.length > 0) {
+        await this.prisma.user.updateMany({
+          where: { tenantId, managerId: targetUserId },
+          data: { managerId: null },
+        });
+
+        for (const agent of agents) {
+          this.auditLog.log({
+            tenantId,
+            userId: actorId,
+            action: AuditAction.UPDATE,
+            entityType: 'User',
+            entityId: agent.id,
+            before: { managerId: targetUserId },
+            after: { managerId: null },
+            metadata: {
+              reason: 'auto_unassigned_manager_removed',
+              formerManagerId: targetUserId,
+            },
+          });
+        }
+      }
     }
 
     await this.prisma.user.update({
@@ -464,8 +721,8 @@ export class TeamService {
   ) {
     const roleLabel: Record<string, string> = {
       TENANT_ADMIN: 'Admin',
+      MANAGER: 'Manager',
       AGENT: 'Agent',
-      VIEWER: 'Viewer',
     };
 
     try {

@@ -7,15 +7,30 @@ import { useConnectedSessions } from '@/hooks/useSessions';
 import { useCampaignTemplates } from '@/hooks/useCampaignTemplates';
 import { useQueryClient } from '@tanstack/react-query';
 import ContactSelector from './ContactSelector';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { DateTimePicker } from '@/components/ui/datetime-picker';
-import { AlertTriangle, X, Link, CalendarClock, Rocket, Save, FileText, Check } from 'lucide-react';
+import {
+  AlertTriangle,
+  X,
+  Link,
+  CalendarClock,
+  Rocket,
+  Save,
+  FileText,
+  Check,
+  Smartphone,
+  MessageSquare,
+  Paperclip,
+  Users,
+  Upload,
+  Image as ImageIcon,
+} from 'lucide-react';
 import { CampaignDetail, ImportRecipientsResult } from '@/types/campaign';
 import { CampaignTemplate } from '@/types/campaign-template';
 import { useAuthStore } from '@/store/authStore';
 import { messagesApi } from '@/services/messages-api';
 import { campaignsApi } from '@/services/campaigns-api';
+import { cn } from '@/lib/utils';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -36,6 +51,8 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 interface CreateCampaignFormProps {
   existingCampaign?: CampaignDetail;
   onSaved?: () => void;
@@ -43,25 +60,56 @@ interface CreateCampaignFormProps {
 
 const EMPTY = { name: '', sessionId: '', messageTemplate: '', scheduledAt: '' };
 type SubmitStep = 'idle' | 'creating' | 'uploading' | 'launching' | 'saving' | 'done';
+type MobileTab = 'message' | 'media' | 'recipients';
 
-// ─── Shared style tokens ──────────────────────────────────────────────────────
+// ─── Style tokens ─────────────────────────────────────────────────────────────
 
-/** Section card — the coloured left-border gives each section a visual identity */
-const sectionCard = (accent: string) =>
-  `rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] border-l-2 ${accent}`;
+const fieldLabel =
+  'block text-[10px] font-[700] uppercase tracking-[0.08em] text-[hsl(var(--muted-foreground))] mb-1.5';
 
-const fieldLabel = 'block text-[10px] font-bold uppercase tracking-widest text-[hsl(var(--muted-foreground))] mb-1.5';
-
-const inputClass =
-  'h-9 w-full rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--muted))] px-3 text-sm ' +
+const inputCls =
+  'h-9 w-full rounded-[var(--radius-sm)] border border-[hsl(var(--border))] bg-[hsl(var(--muted))] px-3 text-[13px] ' +
   'text-[hsl(var(--foreground))] placeholder:text-[hsl(var(--muted-foreground))] ' +
-  'focus:outline-none focus:ring-1 focus:ring-[hsl(var(--green))] ' +
-  'transition-colors hover:border-[hsl(var(--green)/0.35)]';
+  'focus:outline-none focus:ring-1 focus:ring-[hsl(var(--green))]/40 focus:border-[hsl(var(--green))]/60 ' +
+  'transition-colors';
 
-const selectClass =
-  'h-9 w-full rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--muted))] px-3 text-sm ' +
-  'text-[hsl(var(--foreground))] focus:outline-none focus:ring-1 focus:ring-[hsl(var(--green))] ' +
-  'transition-colors hover:border-[hsl(var(--green)/0.35)]';
+const selectCls =
+  'h-9 w-full rounded-[var(--radius-sm)] border border-[hsl(var(--border))] bg-[hsl(var(--muted))] px-3 text-[13px] ' +
+  'text-[hsl(var(--foreground))] ' +
+  'focus:outline-none focus:ring-1 focus:ring-[hsl(var(--green))]/40 focus:border-[hsl(var(--green))]/60 ' +
+  'transition-colors';
+
+const card =
+  'rounded-[var(--radius-lg)] border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-[var(--shadow-sm)] overflow-hidden';
+
+// ─── SectionHeader — declared outside to avoid react-hooks/static-components ──
+
+interface SectionHeaderProps {
+  icon: React.ElementType;
+  label: string;
+  chipBg: string;
+  chipText: string;
+  topBarBg: string;
+  right?: React.ReactNode;
+}
+
+function SectionHeader({ icon: Icon, label, chipBg, chipText, topBarBg, right }: SectionHeaderProps) {
+  return (
+    <div
+      className={`flex items-center justify-between px-4 py-2.5 border-b border-[hsl(var(--border))] shrink-0 ${topBarBg}`}
+    >
+      <div className="flex items-center gap-2">
+        <div className={`h-6 w-6 rounded-md flex items-center justify-center ${chipBg}`}>
+          <Icon size={12} className={chipText} />
+        </div>
+        <span className="text-[11px] font-[700] uppercase tracking-[0.08em] text-[hsl(var(--foreground))]">
+          {label}
+        </span>
+      </div>
+      {right}
+    </div>
+  );
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -96,6 +144,7 @@ export default function CreateCampaignForm({ existingCampaign, onSaved }: Create
   const [submitStep, setSubmitStep] = useState<SubmitStep>('idle');
   const [error, setError] = useState<string | null>(null);
   const [importWarning, setImportWarning] = useState<ImportRecipientsResult | null>(null);
+  const [mobileTab, setMobileTab] = useState<MobileTab>('message');
 
   const { data: sessions, isLoading: sessionsLoading } = useConnectedSessions();
   const { data: templates } = useCampaignTemplates();
@@ -103,7 +152,6 @@ export default function CreateCampaignForm({ existingCampaign, onSaved }: Create
   const { mutateAsync: updateCampaign } = useUpdateCampaign(existingCampaign?.id ?? '');
   const { mutateAsync: uploadRecipients } = useUploadCampaignRecipients();
 
-  // ── Template selector state ───────────────────────────────────────────────
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
   const [pendingTemplate, setPendingTemplate] = useState<CampaignTemplate | null>(null);
 
@@ -120,20 +168,15 @@ export default function CreateCampaignForm({ existingCampaign, onSaved }: Create
     if (!templateId) return;
     const template = templates?.find(t => t.id === templateId);
     if (!template) return;
-
     const hasExistingContent = form.messageTemplate.trim().length > 0 || !!mediaUrl;
-    if (hasExistingContent) {
-      setPendingTemplate(template);
-    } else {
-      applyTemplate(template);
-    }
+    if (hasExistingContent) setPendingTemplate(template);
+    else applyTemplate(template);
   };
 
   const confirmApplyTemplate = () => {
     if (pendingTemplate) applyTemplate(pendingTemplate);
     setPendingTemplate(null);
   };
-
   const cancelApplyTemplate = () => {
     setPendingTemplate(null);
     setSelectedTemplateId('');
@@ -151,6 +194,8 @@ export default function CreateCampaignForm({ existingCampaign, onSaved }: Create
 
   const hasMedia = !!mediaUrl && mediaType !== 'text/link';
   const hasNoRecipients = !isEditMode && selectedIds.length === 0 && selectedTags.length === 0 && !csvFile;
+  const hasMediaAttached = !!mediaUrl;
+  const hasRecipientsSelected = selectedIds.length > 0 || selectedTags.length > 0 || !!csvFile;
 
   const validate = (): string | null => {
     if (!form.name.trim()) return 'Campaign name is required.';
@@ -186,7 +231,6 @@ export default function CreateCampaignForm({ existingCampaign, onSaved }: Create
     setImportWarning(null);
     const validationError = validate();
     if (validationError) return setError(validationError);
-
     const resolvedLinkUrl = hasMedia && linkUrl.trim() ? linkUrl.trim() : undefined;
 
     if (isEditMode) {
@@ -206,7 +250,7 @@ export default function CreateCampaignForm({ existingCampaign, onSaved }: Create
         onSaved?.();
       } catch (err: unknown) {
         setSubmitStep('idle');
-        setError(extractApiError(err) ?? 'Failed to save changes. Please try again.');
+        setError(extractApiError(err) ?? 'Failed to save changes.');
       }
       return;
     }
@@ -231,12 +275,13 @@ export default function CreateCampaignForm({ existingCampaign, onSaved }: Create
       campaignId = campaign.data.id;
     } catch (err: unknown) {
       setSubmitStep('idle');
-      setError(extractApiError(err) ?? 'Failed to create campaign. Please try again.');
+      setError(extractApiError(err) ?? 'Failed to create campaign.');
       return;
     }
 
     if (csvFile) {
       try {
+        console.log('csvFile:', csvFile?.name, csvFile?.type, csvFile?.size);
         setSubmitStep('uploading');
         const result = await uploadRecipients({ campaignId, file: csvFile });
         if (result.skipped > 0 || result.errors.length > 0) {
@@ -246,9 +291,7 @@ export default function CreateCampaignForm({ existingCampaign, onSaved }: Create
         }
       } catch (err: unknown) {
         setSubmitStep('idle');
-        setError(
-          `Campaign created, but recipient upload failed: ${extractApiError(err) ?? 'unknown error'}. You can find your campaign in the campaigns list.`,
-        );
+        setError(`Campaign created, but recipient upload failed: ${extractApiError(err) ?? 'unknown error'}.`);
         await delay(3000);
         router.push(`/dashboard/campaigns/${campaignId}`);
         return;
@@ -262,9 +305,7 @@ export default function CreateCampaignForm({ existingCampaign, onSaved }: Create
         queryClient.invalidateQueries({ queryKey: campaignKeys.all(tenantId) });
       } catch (err: unknown) {
         setSubmitStep('idle');
-        setError(
-          `Campaign created, but launch failed: ${extractApiError(err) ?? 'unknown error'}. You can launch it from the campaign page.`,
-        );
+        setError(`Campaign created, but launch failed: ${extractApiError(err) ?? 'unknown error'}.`);
         await delay(3000);
         router.push(`/dashboard/campaigns/${campaignId}`);
         return;
@@ -274,421 +315,504 @@ export default function CreateCampaignForm({ existingCampaign, onSaved }: Create
     router.push(`/dashboard/campaigns/${campaignId}`);
   };
 
-  const recipientSummary = [
-    selectedIds.length > 0 ? `${selectedIds.length} contact${selectedIds.length !== 1 ? 's' : ''}` : null,
-    selectedTags.length > 0 ? `${selectedTags.length} tag${selectedTags.length !== 1 ? 's' : ''}` : null,
-    csvFile ? `CSV: ${csvFile.name}` : null,
-  ]
-    .filter(Boolean)
-    .join(' + ');
+  // ── Shared JSX blocks (plain variables, NOT components) ───────────────────
+  // These are JSX expressions, not components — no props, no hooks.
+  // `fill` variants are separate variables to avoid react-hooks/static-components.
 
-  // ── Render ────────────────────────────────────────────────────────────────
-
-  return (
-    <div className="flex flex-col h-full gap-0">
-      {/* ══════════════════════════════════════════════════════════════════
-          TOP BAR — title · schedule · actions
-          ══════════════════════════════════════════════════════════════════ */}
-      <div className="shrink-0 flex items-center gap-4 pb-5 flex-wrap">
-        {/* Title */}
-        <div className="flex-1 min-w-0">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-[hsl(var(--muted-foreground))] mb-0.5">
-            Marketing
-          </p>
-          <h1 className="text-2xl font-bold tracking-tight text-[hsl(var(--foreground))] leading-none">
-            {isEditMode ? `Edit — ${existingCampaign.name}` : 'New campaign'}
-          </h1>
-        </div>
-
-        {/* Schedule picker */}
-        <div className="flex items-center gap-2 shrink-0">
-          <CalendarClock className="w-4 h-4 text-[hsl(var(--muted-foreground))]" />
-          <span className="text-xs font-medium text-[hsl(var(--muted-foreground))] hidden sm:block">Schedule</span>
-          <DateTimePicker
-            value={form.scheduledAt}
-            onChange={v => setForm(prev => ({ ...prev, scheduledAt: v }))}
-            placeholder="Send immediately"
-            className="w-48"
+  // ① Details card — always shrink-0
+  const detailsCard = (
+    <div className={`${card} shrink-0`}>
+      <SectionHeader
+        icon={Smartphone}
+        label="Campaign details"
+        chipBg="bg-blue-50"
+        chipText="text-blue-500"
+        topBarBg="bg-blue-50/40"
+      />
+      <div className="p-4 grid grid-cols-2 gap-4">
+        <div>
+          <label htmlFor="cc-name" className={fieldLabel}>
+            Name <span className="text-red-400 normal-case font-normal">*</span>
+          </label>
+          <input
+            id="cc-name"
+            placeholder="e.g. Diwali Sale 2025"
+            value={form.name}
+            onChange={set('name')}
+            className={inputCls}
           />
         </div>
-
-        {/* Divider */}
-        <div className="h-7 w-px bg-[hsl(var(--border))] shrink-0" />
-
-        {/* Buttons */}
-        <div className="flex items-center gap-2 shrink-0">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={isEditMode ? onSaved : () => router.back()}
-            disabled={isPending}
-            className="h-9 px-4 text-xs"
+        <div>
+          <label htmlFor="cc-session" className={fieldLabel}>
+            Send from <span className="text-red-400 normal-case font-normal">*</span>
+          </label>
+          <select
+            id="cc-session"
+            value={form.sessionId}
+            onChange={e => setForm(prev => ({ ...prev, sessionId: e.target.value }))}
+            disabled={sessionsLoading}
+            className={selectCls}
           >
-            Cancel
-          </Button>
-
-          {!isEditMode && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => handleSubmit(false)}
-              disabled={isPending}
-              className="h-9 px-4 text-xs gap-1.5 min-w-[120px]"
-            >
-              <Save className="w-3.5 h-3.5" />
-              {submitStep === 'creating' ? 'Creating…' : submitStep === 'uploading' ? 'Uploading…' : 'Save as Draft'}
-            </Button>
+            <option value="">{sessionsLoading ? 'Loading…' : 'Select a session'}</option>
+            {sessions?.map(s => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+                {s.phoneNumber ? ` (${s.phoneNumber})` : ''}
+              </option>
+            ))}
+          </select>
+          {!sessionsLoading && sessions?.length === 0 && (
+            <p className="text-[10px] text-[hsl(var(--muted-foreground))] mt-1">No connected sessions.</p>
           )}
-
-          <Button
-            size="sm"
-            onClick={() => handleSubmit(!isEditMode)}
-            disabled={isPending || (!isEditMode && hasNoRecipients)}
-            title={!isEditMode && hasNoRecipients ? 'Add recipients before launching' : undefined}
-            className="h-9 px-4 text-xs gap-1.5 min-w-[130px] bg-[hsl(var(--purple-dim))] border border-[hsl(var(--purple)/0.35)] text-[hsl(var(--purple))] hover:bg-[hsl(var(--purple)/0.22)] disabled:opacity-40"
-          >
-            <Rocket className="w-3.5 h-3.5" />
-            {isEditMode
-              ? submitStep === 'saving'
-                ? 'Saving…'
-                : 'Save changes'
-              : submitStep === 'creating'
-                ? 'Creating…'
-                : submitStep === 'uploading'
-                  ? 'Uploading…'
-                  : submitStep === 'launching'
-                    ? 'Launching…'
-                    : 'Save & Launch'}
-          </Button>
         </div>
       </div>
+    </div>
+  );
 
-      {/* Errors / warnings */}
+  // Template picker node (reused inside message card header)
+  const templatePicker = !!templates?.length ? (
+    <div className="flex items-center gap-1.5">
+      <FileText size={11} className="text-[hsl(var(--green))] shrink-0" />
+      <select
+        value={selectedTemplateId}
+        onChange={e => handleTemplateChange(e.target.value)}
+        className="h-7 w-48 rounded-md border border-purple-300 bg-purple-500 px-2 text-[11px] font-[600] text-white focus:outline-none focus:ring-1 focus:ring-[hsl(var(--green))]/40 cursor-pointer"
+      >
+        <option value="">Pick a Template</option>
+        {templates.map(t => (
+          <option key={t.id} value={t.id}>
+            {t.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  ) : null;
+
+  // ② Message card — filling variant (desktop left col + mobile message tab)
+  const messageFill = (
+    <div className={`${card} flex-1 min-h-0 flex flex-col`}>
+      <SectionHeader
+        icon={MessageSquare}
+        label="Message"
+        chipBg="bg-[hsl(var(--green-subtle))]"
+        chipText="text-[hsl(var(--green))]"
+        topBarBg="bg-[hsl(var(--green-subtle))]/60"
+        right={templatePicker}
+      />
+      <div className="p-4 flex-1 min-h-0 flex flex-col gap-2">
+        <textarea
+          id="cc-message"
+          placeholder={'Write your broadcast message here…\n\nHi {name}, we have an exciting offer for you! 🎉'}
+          value={form.messageTemplate}
+          onChange={set('messageTemplate')}
+          className="w-full flex-1 min-h-0 rounded-[var(--radius-sm)] border border-[hsl(var(--border))] bg-[hsl(var(--muted))] px-3 py-3 text-[13px] placeholder:text-[hsl(var(--muted-foreground))]/60 focus:outline-none focus:ring-1 focus:ring-[hsl(var(--green))]/40 focus:border-[hsl(var(--green))]/60 resize-none leading-relaxed transition-colors"
+        />
+        <p className="text-[11px] text-[hsl(var(--muted-foreground))] tabular-nums shrink-0">
+          {form.messageTemplate.length} characters
+        </p>
+      </div>
+    </div>
+  );
+
+  // ③ Media card — always shrink-0
+  const mediaToggle = (
+    <div className="flex gap-0.5 bg-[hsl(var(--muted))] rounded-lg p-0.5">
+      {(['upload', 'url'] as const).map(mode => (
+        <button
+          key={mode}
+          type="button"
+          onClick={() => {
+            setMediaMode(mode);
+            setMediaUrl('');
+            setMediaType('');
+            setMediaPreview(null);
+          }}
+          className={cn(
+            'px-2.5 py-1 rounded-md text-[10px] font-[700] transition-all capitalize',
+            mediaMode === mode
+              ? 'bg-amber-500/15 text-amber-500 border border-amber-500/30'
+              : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]',
+          )}
+        >
+          {mode === 'upload' ? 'Upload' : 'URL'}
+        </button>
+      ))}
+    </div>
+  );
+
+  const mediaCard = (
+    <div className={`${card} shrink-0`}>
+      <SectionHeader
+        icon={Paperclip}
+        label="Media"
+        chipBg="bg-amber-50"
+        chipText="text-amber-500"
+        topBarBg="bg-amber-50/40"
+        right={mediaToggle}
+      />
+      <div className="p-4 space-y-3">
+        <p className="text-[11px] text-[hsl(var(--muted-foreground))]">
+          Optional — attach an image, video, or PDF to your message.
+        </p>
+        {mediaMode === 'upload' ? (
+          <div className="relative">
+            <label
+              htmlFor="cc-media-file"
+              className={cn(
+                'flex flex-col items-center justify-center gap-2 py-5 rounded-[var(--radius)] border-2 border-dashed cursor-pointer transition-all',
+                mediaUploading
+                  ? 'opacity-50 pointer-events-none border-[hsl(var(--border))]'
+                  : mediaUrl
+                    ? 'border-[hsl(var(--green))]/50 bg-[hsl(var(--green-subtle))]'
+                    : 'border-amber-300 hover:border-amber-400 hover:bg-amber-50/50',
+              )}
+            >
+              {mediaUploading ? (
+                <>
+                  <Upload size={18} className="text-[hsl(var(--muted-foreground))] animate-pulse" />
+                  <p className="text-[12px] text-[hsl(var(--muted-foreground))]">Uploading…</p>
+                </>
+              ) : mediaUrl ? (
+                <>
+                  {mediaPreview ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={mediaPreview}
+                      alt="Preview"
+                      className="max-h-16 rounded-lg object-cover border border-[hsl(var(--border))]"
+                    />
+                  ) : (
+                    <ImageIcon size={18} className="text-[hsl(var(--green))]" />
+                  )}
+                  <p className="text-[12px] font-[600] text-[hsl(var(--green))]">✓ {mediaType || 'File'} uploaded</p>
+                </>
+              ) : (
+                <>
+                  <div className="h-9 w-9 rounded-xl bg-amber-50 flex items-center justify-center">
+                    <Upload size={16} className="text-amber-500" />
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[12px] font-[500] text-[hsl(var(--foreground))]">
+                      Drop a file or click to browse
+                    </p>
+                    <p className="text-[11px] text-[hsl(var(--muted-foreground))] mt-0.5">JPG · PNG · MP4 · PDF</p>
+                  </div>
+                </>
+              )}
+            </label>
+            <input
+              id="cc-media-file"
+              type="file"
+              accept="image/jpeg,image/png,video/mp4,application/pdf"
+              className="sr-only"
+              onChange={e => {
+                const f = e.target.files?.[0];
+                if (f) handleMediaUpload(f);
+              }}
+            />
+            {mediaUrl && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMediaUrl('');
+                  setMediaType('');
+                  setMediaPreview(null);
+                }}
+                className="absolute top-2 right-2 p-1 rounded-md bg-[hsl(var(--card))] border border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:text-red-400 transition-colors"
+              >
+                <X size={11} />
+              </button>
+            )}
+          </div>
+        ) : (
+          <input
+            id="cc-media-url"
+            placeholder="https://… image, video, or PDF URL"
+            value={mediaUrl}
+            className={inputCls}
+            onChange={e => {
+              setMediaUrl(e.target.value);
+              const url = e.target.value.toLowerCase();
+              if (url.match(/\.(jpg|jpeg|png|gif|webp)$/)) setMediaType('image/jpeg');
+              else if (url.match(/\.mp4$/)) setMediaType('video/mp4');
+              else if (url.match(/\.pdf$/)) setMediaType('application/pdf');
+              else setMediaType('text/link');
+            }}
+          />
+        )}
+        {hasMedia && (
+          <div className="flex items-center gap-2">
+            <Link size={12} className="text-[hsl(var(--muted-foreground))] shrink-0" />
+            <input
+              id="cc-link-url"
+              placeholder="Optional link URL (e.g. https://yoursite.com/offer)"
+              value={linkUrl}
+              onChange={e => setLinkUrl(e.target.value)}
+              className={inputCls + ' h-8 text-[12px]'}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  // ④ Recipients card — filling variant
+  const recipientsFill = (
+    <div className={`${card} flex-1 min-h-0 flex flex-col`}>
+      <SectionHeader
+        icon={Users}
+        label="Recipients"
+        chipBg="bg-violet-50"
+        chipText="text-violet-500"
+        topBarBg="bg-violet-50/40"
+      />
+      {isEditMode ? (
+        <div className="px-4 py-5">
+          <p className="text-[13px] text-[hsl(var(--muted-foreground))]">
+            Use the <span className="font-[600] text-[hsl(var(--foreground))]">Add recipients</span> button on this
+            campaign to manage recipients. They can&apos;t be changed here.
+          </p>
+        </div>
+      ) : (
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <ContactSelector
+            selectedIds={selectedIds}
+            onSelectedIdsChange={setSelectedIds}
+            csvFile={csvFile}
+            onCsvFileChange={setCsvFile}
+            selectedTags={selectedTags}
+            onSelectedTagsChange={setSelectedTags}
+          />
+        </div>
+      )}
+    </div>
+  );
+
+  // ⑤ Send rate — slim strip
+  const sendRateStrip = (
+    <div className="flex items-center gap-3 px-4 py-3 rounded-[var(--radius-lg)] border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-[var(--shadow-sm)] shrink-0">
+      <span className="text-[10px] font-[700] uppercase tracking-[0.08em] text-[hsl(var(--muted-foreground))] shrink-0">
+        Send rate
+      </span>
+      <input
+        type="range"
+        min={10}
+        max={60}
+        step={1}
+        value={rateLimitPerMin}
+        onChange={e => setRateLimitPerMin(Number(e.target.value))}
+        className="flex-1 accent-[hsl(var(--green))]"
+      />
+      <span className="text-[13px] font-[700] tabular-nums text-[hsl(var(--foreground))] shrink-0 w-16 text-right">
+        {rateLimitPerMin}
+        <span className="text-[11px] font-[400] text-[hsl(var(--muted-foreground))]"> / min</span>
+      </span>
+    </div>
+  );
+
+  // Action bar
+  const actionBar = (
+    <div className="flex items-center gap-3 px-4 py-2.5 rounded-[var(--radius-lg)] border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-[var(--shadow-sm)] shrink-0 flex-wrap">
+      <div className="flex items-center gap-2 flex-1 min-w-0">
+        <CalendarClock size={13} className="text-[hsl(var(--muted-foreground))] shrink-0" />
+        <span className="text-[11px] font-[500] text-[hsl(var(--muted-foreground))] shrink-0 hidden sm:block">
+          Schedule
+        </span>
+        <DateTimePicker
+          value={form.scheduledAt}
+          onChange={v => setForm(prev => ({ ...prev, scheduledAt: v }))}
+          placeholder="Send immediately"
+          className="w-40 text-[12px]"
+        />
+      </div>
+      <div className="h-5 w-px bg-[hsl(var(--border))] shrink-0 hidden sm:block" />
+      <div className="flex items-center gap-2 shrink-0">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={isEditMode ? onSaved : () => router.back()}
+          disabled={isPending}
+          className="h-8 px-3 text-[12px] font-[500]"
+        >
+          Cancel
+        </Button>
+        {!isEditMode && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => handleSubmit(false)}
+            disabled={isPending}
+            className="h-8 px-3 text-[12px] font-[500] gap-1.5 min-w-[110px]"
+          >
+            <Save size={12} />
+            {submitStep === 'creating' ? 'Creating…' : submitStep === 'uploading' ? 'Uploading…' : 'Save as Draft'}
+          </Button>
+        )}
+        <Button
+          size="sm"
+          onClick={() => handleSubmit(!isEditMode)}
+          disabled={isPending || (!isEditMode && hasNoRecipients)}
+          title={!isEditMode && hasNoRecipients ? 'Add recipients before launching' : undefined}
+          className="h-8 px-3 text-[12px] font-[600] gap-1.5 min-w-[120px] bg-[hsl(var(--purple))] text-white hover:opacity-90 shadow-sm disabled:opacity-40"
+        >
+          <Rocket size={12} />
+          {isEditMode
+            ? submitStep === 'saving'
+              ? 'Saving…'
+              : 'Save changes'
+            : submitStep === 'creating'
+              ? 'Creating…'
+              : submitStep === 'uploading'
+                ? 'Uploading…'
+                : submitStep === 'launching'
+                  ? 'Launching…'
+                  : 'Save & Launch'}
+        </Button>
+      </div>
+    </div>
+  );
+
+  // Alerts
+  const alerts = (
+    <>
       {error && (
-        <div className="shrink-0 mb-4 flex items-start gap-2.5 rounded-xl bg-red-500/10 border border-red-500/25 px-4 py-3">
-          <X className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-          <p className="text-sm text-red-400">{error}</p>
+        <div className="flex items-start gap-2.5 rounded-[var(--radius)] bg-red-500/10 border border-red-500/25 px-4 py-3 shrink-0">
+          <X size={13} className="text-red-400 shrink-0 mt-0.5" />
+          <p className="text-[13px] text-red-400">{error}</p>
         </div>
       )}
       {importWarning && (
-        <div className="shrink-0 mb-4 rounded-xl bg-amber-500/10 border border-amber-500/25 px-4 py-3 flex flex-col gap-1.5">
-          <div className="flex items-center gap-2.5">
-            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-            <p className="text-sm text-amber-400 font-medium">
+        <div className="rounded-[var(--radius)] bg-amber-500/10 border border-amber-500/25 px-4 py-3 flex flex-col gap-1.5 shrink-0">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={13} className="text-amber-400 shrink-0" />
+            <p className="text-[13px] text-amber-400 font-[500]">
               {importWarning.created} recipient{importWarning.created !== 1 ? 's' : ''} added
               {importWarning.skipped > 0 && `, ${importWarning.skipped} skipped`}
             </p>
           </div>
           {importWarning.errors.slice(0, 3).map((e, i) => (
-            <p key={i} className="text-xs text-amber-400/70 pl-6">
+            <p key={i} className="text-[11px] text-amber-400/70 pl-5">
               Row {e.row}: {e.reason}
             </p>
           ))}
         </div>
       )}
-
-      {/* Template overwrite confirmation */}
       {pendingTemplate && (
-        <div className="shrink-0 mb-4 flex items-center justify-between gap-3 rounded-xl bg-amber-500/10 border border-amber-500/25 px-4 py-3">
-          <div className="flex items-center gap-2.5">
-            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-            <p className="text-sm text-amber-400">
-              Apply template <span className="font-semibold">{pendingTemplate.name}</span>? This will replace your
-              current message{pendingTemplate.mediaUrl ? ' and media' : ''}.
+        <div className="flex items-center justify-between gap-3 rounded-[var(--radius)] bg-amber-500/10 border border-amber-500/25 px-4 py-3 shrink-0">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={13} className="text-amber-400 shrink-0" />
+            <p className="text-[13px] text-amber-400">
+              Apply <span className="font-[600]">{pendingTemplate.name}</span>? Replaces current message
+              {pendingTemplate.mediaUrl ? ' and media' : ''}.
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={confirmApplyTemplate}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs bg-amber-500/15 border border-amber-500/30 text-amber-400 hover:bg-amber-500/25 transition-colors"
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-[600] bg-amber-500/15 border border-amber-500/30 text-amber-500 hover:bg-amber-500/25 transition-colors"
             >
-              <Check className="w-3 h-3" />
-              Apply
+              <Check size={10} /> Apply
             </button>
             <button
               onClick={cancelApplyTemplate}
-              className="inline-flex items-center px-2.5 py-1 rounded-md text-xs bg-[hsl(var(--muted))] border border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-colors"
+              className="inline-flex items-center px-2.5 py-1 rounded-md text-[11px] bg-[hsl(var(--muted))] border border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-colors"
             >
               Cancel
             </button>
           </div>
         </div>
       )}
+    </>
+  );
 
-      {/* ══════════════════════════════════════════════════════════════════
-          BODY — two columns
-          ══════════════════════════════════════════════════════════════════ */}
-      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* ── LEFT COLUMN ─────────────────────────────────────────────── */}
-        <div className="flex flex-col gap-4 min-h-0">
-          {/* ① Campaign identity — green left border */}
-          <div className={`shrink-0 ${sectionCard('border-l-[hsl(var(--green))]')} p-4`}>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label htmlFor="cc-name" className={fieldLabel}>
-                  Campaign name <span className="text-red-400 normal-case">*</span>
-                </label>
-                <Input
-                  id="cc-name"
-                  placeholder="Diwali sale announcement"
-                  value={form.name}
-                  onChange={set('name')}
-                  className={inputClass}
-                />
-              </div>
-              <div>
-                <label htmlFor="cc-session" className={fieldLabel}>
-                  Send from <span className="text-red-400 normal-case">*</span>
-                </label>
-                <select
-                  id="cc-session"
-                  value={form.sessionId}
-                  onChange={e => setForm(prev => ({ ...prev, sessionId: e.target.value }))}
-                  disabled={sessionsLoading}
-                  className={selectClass}
-                >
-                  <option value="">{sessionsLoading ? 'Loading…' : 'Select a session'}</option>
-                  {sessions?.map(s => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                      {s.phoneNumber ? ` (${s.phoneNumber})` : ''}
-                    </option>
-                  ))}
-                </select>
-                {!sessionsLoading && sessions?.length === 0 && (
-                  <p className="text-[10px] text-[hsl(var(--muted-foreground))] mt-1">No connected sessions.</p>
-                )}
-              </div>
-            </div>
-          </div>
+  // Mobile tab bar
+  const MOBILE_TABS: { id: MobileTab; label: string; icon: React.ElementType; activeCls: string; dot: boolean }[] = [
+    {
+      id: 'message',
+      label: 'Message',
+      icon: MessageSquare,
+      activeCls: 'bg-[hsl(var(--green))] text-white',
+      dot: false,
+    },
+    { id: 'media', label: 'Media', icon: Paperclip, activeCls: 'bg-amber-500 text-white', dot: hasMediaAttached },
+    {
+      id: 'recipients',
+      label: 'Recipients',
+      icon: Users,
+      activeCls: 'bg-violet-500 text-white',
+      dot: hasRecipientsSelected,
+    },
+  ];
 
-          {/* ② Message — grows to fill */}
-          <div className={`flex-1 min-h-0 ${sectionCard('border-l-[hsl(var(--green)/0.5)]')} flex flex-col p-4 gap-2`}>
-            <label htmlFor="cc-message" className={fieldLabel}>
-              Message <span className="text-red-400 normal-case">*</span>
-            </label>
-            {!!templates?.length && (
-              <div className="shrink-0 flex items-center gap-2 rounded-lg border border-[hsl(var(--green)/0.3)] bg-[hsl(var(--green-dim))] px-3 py-2 mb-1">
-                <FileText className="w-4 h-4 text-[hsl(var(--green))] shrink-0" />
-                <span className="text-xs font-medium text-[hsl(var(--foreground))] whitespace-nowrap">
-                  Apply a saved template
-                </span>
-                <select
-                  value={selectedTemplateId}
-                  onChange={e => handleTemplateChange(e.target.value)}
-                  className="flex-1 h-8 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-2.5 text-xs font-medium text-[hsl(var(--foreground))] focus:outline-none focus:ring-1 focus:ring-[hsl(var(--green))] cursor-pointer"
-                >
-                  <option value="">Choose a template…</option>
-                  {templates.map(t => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+  const mobileTabBar = (
+    <div className="flex gap-1.5 p-1 rounded-[var(--radius-lg)] border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-[var(--shadow-sm)] shrink-0">
+      {MOBILE_TABS.map(tab => {
+        const Icon = tab.icon;
+        const isActive = mobileTab === tab.id;
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setMobileTab(tab.id)}
+            className={cn(
+              'relative flex-1 flex items-center justify-center gap-1.5 py-2 rounded-[var(--radius-sm)] text-[12px] font-[600] transition-all',
+              isActive
+                ? tab.activeCls
+                : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))]',
             )}
-            <textarea
-              id="cc-message"
-              placeholder="Write your broadcast message…"
-              value={form.messageTemplate}
-              onChange={set('messageTemplate')}
-              className="flex-1 min-h-0 w-full rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--muted))] px-3 py-3 text-sm placeholder:text-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-1 focus:ring-[hsl(var(--green))] resize-none leading-relaxed transition-colors hover:border-[hsl(var(--green)/0.35)]"
-            />
-            {(recipientSummary || (hasMedia && linkUrl.trim())) && (
-              <div className="flex items-center gap-3 mt-0.5">
-                {recipientSummary && (
-                  <span className="text-[10px] text-[hsl(var(--muted-foreground))]">→ {recipientSummary}</span>
-                )}
-                {hasMedia && linkUrl.trim() && (
-                  <span className="text-[10px] text-[hsl(var(--green))] flex items-center gap-1">
-                    <Link className="w-2.5 h-2.5" /> Link card will follow
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* ③ Media — amber/orange left border to distinguish it */}
-          <div className={`shrink-0 ${sectionCard('border-l-amber-500')} p-4`}>
-            {/* Header */}
-            <div className="flex items-center justify-between mb-3">
-              <label className={fieldLabel + ' mb-0'}>
-                Media{' '}
-                <span className="normal-case tracking-normal font-normal text-[hsl(var(--muted-foreground))]">
-                  (optional)
-                </span>
-              </label>
-              {/* Segmented Upload / URL toggle */}
-              <div className="flex gap-0.5 bg-[hsl(var(--muted))] rounded-lg p-0.5">
-                {(['upload', 'url'] as const).map(mode => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => {
-                      setMediaMode(mode);
-                      setMediaUrl('');
-                      setMediaType('');
-                      setMediaPreview(null);
-                    }}
-                    className={`px-3 py-1 rounded-md text-[10px] font-semibold transition-all capitalize ${
-                      mediaMode === mode
-                        ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-                        : 'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]'
-                    }`}
-                  >
-                    {mode}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Upload zone or URL input */}
-            {mediaMode === 'upload' ? (
-              <div className="relative">
-                <label
-                  htmlFor="cc-media-file"
-                  className={`flex items-center justify-center gap-2.5 h-11 rounded-lg border border-dashed text-xs transition-colors cursor-pointer ${
-                    mediaUploading
-                      ? 'opacity-50 pointer-events-none border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))]'
-                      : mediaUrl
-                        ? 'border-[hsl(var(--green)/0.4)] bg-[hsl(var(--green-dim))] text-[hsl(var(--green))]'
-                        : 'border-amber-500/30 text-[hsl(var(--muted-foreground))] hover:border-amber-500/60 hover:text-[hsl(var(--foreground))] hover:bg-amber-500/5'
-                  }`}
-                >
-                  {mediaUploading ? (
-                    'Uploading…'
-                  ) : mediaUrl ? (
-                    `✓ ${mediaType || 'file'} uploaded`
-                  ) : (
-                    <>
-                      <span>Drop a file or click to browse</span>
-                      <span className="opacity-40 text-[10px]">JPG PNG MP4 PDF</span>
-                    </>
-                  )}
-                </label>
-                <input
-                  id="cc-media-file"
-                  type="file"
-                  accept="image/jpeg,image/png,video/mp4,application/pdf"
-                  className="sr-only"
-                  onChange={e => {
-                    const f = e.target.files?.[0];
-                    if (f) handleMediaUpload(f);
-                  }}
-                />
-                {mediaUrl && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMediaUrl('');
-                      setMediaType('');
-                      setMediaPreview(null);
-                    }}
-                    className="absolute top-2 right-2.5 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-            ) : (
-              <input
-                id="cc-media-url"
-                placeholder="https://… image, video, or PDF URL"
-                value={mediaUrl}
-                className={inputClass}
-                onChange={e => {
-                  setMediaUrl(e.target.value);
-                  const url = e.target.value.toLowerCase();
-                  if (url.match(/\.(jpg|jpeg|png|gif|webp)$/)) setMediaType('image/jpeg');
-                  else if (url.match(/\.mp4$/)) setMediaType('video/mp4');
-                  else if (url.match(/\.pdf$/)) setMediaType('application/pdf');
-                  else setMediaType('text/link');
-                }}
-              />
-            )}
-
-            {/* Link URL — only when media is attached */}
-            {hasMedia && (
-              <div className="flex items-center gap-2 mt-2.5">
-                <Link className="w-3.5 h-3.5 text-[hsl(var(--muted-foreground))] shrink-0" />
-                <input
-                  id="cc-link-url"
-                  placeholder="https://yourwebsite.com/offer (WhatsApp card, optional)"
-                  value={linkUrl}
-                  onChange={e => setLinkUrl(e.target.value)}
-                  className={inputClass + ' h-8 text-xs'}
-                />
-              </div>
-            )}
-
-            {mediaPreview && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={mediaPreview}
-                alt="Preview"
-                className="mt-3 rounded-lg max-h-16 object-cover border border-[hsl(var(--border))]"
-              />
-            )}
-          </div>
-        </div>
-
-        {/* ── RIGHT COLUMN ────────────────────────────────────────────── */}
-        <div className="flex flex-col gap-4 min-h-0">
-          {/* ④ Recipients — purple left border, fills available height */}
-          <div
-            className={`flex-1 min-h-0 ${sectionCard('border-l-[hsl(var(--purple))]')} flex flex-col overflow-hidden`}
           >
-            {/* Section label sits above ContactSelector */}
-            <div className="shrink-0 px-4 pt-4 pb-0">
-              <span className={fieldLabel}>
-                Recipients <span className="text-red-400 normal-case">*</span>
-              </span>
-            </div>
-
-            {isEditMode ? (
-              <div className="px-4 pb-4 pt-2">
-                <p className="text-xs text-[hsl(var(--muted-foreground))]">
-                  Use the <span className="text-[hsl(var(--foreground))]">Add recipients</span> button on this campaign
-                  to manage recipients. They can&apos;t be changed here.
-                </p>
-              </div>
-            ) : (
-              /* ContactSelector fills the rest of this card's height */
-              <div className="flex-1 min-h-0 overflow-hidden">
-                <ContactSelector
-                  selectedIds={selectedIds}
-                  onSelectedIdsChange={setSelectedIds}
-                  csvFile={csvFile}
-                  onCsvFileChange={setCsvFile}
-                  selectedTags={selectedTags}
-                  onSelectedTagsChange={setSelectedTags}
-                />
-              </div>
+            <Icon size={13} />
+            {tab.label}
+            {tab.dot && !isActive && (
+              <span className="absolute top-1.5 right-2 h-1.5 w-1.5 rounded-full bg-[hsl(var(--green))]" />
             )}
-          </div>
+          </button>
+        );
+      })}
+    </div>
+  );
 
-          {/* ⑤ Send rate — subtle left border */}
-          <div className={`shrink-0 ${sectionCard('border-l-[hsl(var(--muted-foreground)/0.4)]')} p-4`}>
-            <div className="flex items-center justify-between mb-3">
-              <span className={fieldLabel + ' mb-0'}>Send rate</span>
-              <span className="text-sm font-bold tabular-nums text-[hsl(var(--foreground))]">
-                {rateLimitPerMin}
-                <span className="text-xs font-normal text-[hsl(var(--muted-foreground))] ml-0.5">/ min</span>
-              </span>
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  return (
+    <div className="flex flex-col gap-3 h-[calc(100dvh-10.5rem)]">
+      {actionBar}
+      {alerts}
+
+      {/* ── DESKTOP (lg+): two columns, fills height ── */}
+      <div className="hidden lg:grid lg:grid-cols-2 lg:gap-4 flex-1 min-h-0">
+        {/* Left */}
+        <div className="flex flex-col gap-4 min-h-0">
+          {detailsCard}
+          {messageFill}
+          {mediaCard}
+        </div>
+        {/* Right */}
+        <div className="flex flex-col gap-4 min-h-0">
+          {recipientsFill}
+          {sendRateStrip}
+        </div>
+      </div>
+
+      {/* ── MOBILE (<lg): tabbed, single panel fills height ── */}
+      <div className="flex lg:hidden flex-col gap-3 flex-1 min-h-0">
+        {mobileTabBar}
+        <div className="flex-1 min-h-0">
+          {mobileTab === 'message' && (
+            <div className="flex flex-col gap-3 h-full min-h-0">
+              {detailsCard}
+              {messageFill}
             </div>
-            <input
-              type="range"
-              min={10}
-              max={60}
-              step={1}
-              value={rateLimitPerMin}
-              onChange={e => setRateLimitPerMin(Number(e.target.value))}
-              className="w-full accent-[hsl(var(--green))]"
-            />
-            <p className="text-[10px] text-[hsl(var(--muted-foreground))] mt-2">
-              20–30/min is safe for most accounts. Higher rates may increase spam risk.
-            </p>
-          </div>
+          )}
+          {mobileTab === 'media' && (
+            <div className="flex flex-col gap-3 h-full min-h-0 overflow-y-auto">{mediaCard}</div>
+          )}
+          {mobileTab === 'recipients' && (
+            <div className="flex flex-col gap-3 h-full min-h-0">
+              {recipientsFill}
+              {sendRateStrip}
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -6,6 +6,7 @@ import {
   Param,
   Query,
   Body,
+  Req,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -28,12 +29,14 @@ export class ConversationsController {
   constructor(private readonly conversationsService: ConversationsService) {}
 
   // GET /tenants/:tenantId/conversations
+  // UPDATED (RBAC hierarchy feature) — MANAGER added: day-to-day
+  // conversation access mirrors AGENT.
   @Get()
   @Roles(
     UserRole.TENANT_OWNER,
     UserRole.TENANT_ADMIN,
+    UserRole.MANAGER,
     UserRole.AGENT,
-    UserRole.VIEWER,
   )
   async listConversations(
     @Param('tenantId') tenantId: string,
@@ -47,8 +50,8 @@ export class ConversationsController {
   @Roles(
     UserRole.TENANT_OWNER,
     UserRole.TENANT_ADMIN,
+    UserRole.MANAGER,
     UserRole.AGENT,
-    UserRole.VIEWER,
   )
   async getConversation(
     @Param('tenantId') tenantId: string,
@@ -64,8 +67,8 @@ export class ConversationsController {
   @Roles(
     UserRole.TENANT_OWNER,
     UserRole.TENANT_ADMIN,
+    UserRole.MANAGER,
     UserRole.AGENT,
-    UserRole.VIEWER,
   )
   async getMessages(
     @Param('tenantId') tenantId: string,
@@ -84,7 +87,12 @@ export class ConversationsController {
   // POST /tenants/:tenantId/conversations/:conversationId/read
   @Post(':conversationId/read')
   @HttpCode(HttpStatus.OK)
-  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
+  @Roles(
+    UserRole.TENANT_OWNER,
+    UserRole.TENANT_ADMIN,
+    UserRole.MANAGER,
+    UserRole.AGENT,
+  )
   async markAsRead(
     @Param('tenantId') tenantId: string,
     @Param('conversationId') conversationId: string,
@@ -95,7 +103,12 @@ export class ConversationsController {
   // PATCH /tenants/:tenantId/conversations/:conversationId/pin
   @Patch(':conversationId/pin')
   @HttpCode(HttpStatus.OK)
-  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
+  @Roles(
+    UserRole.TENANT_OWNER,
+    UserRole.TENANT_ADMIN,
+    UserRole.MANAGER,
+    UserRole.AGENT,
+  )
   async pinConversation(
     @Param('tenantId') tenantId: string,
     @Param('conversationId') conversationId: string,
@@ -106,7 +119,12 @@ export class ConversationsController {
   // PATCH /tenants/:tenantId/conversations/:conversationId/unpin
   @Patch(':conversationId/unpin')
   @HttpCode(HttpStatus.OK)
-  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
+  @Roles(
+    UserRole.TENANT_OWNER,
+    UserRole.TENANT_ADMIN,
+    UserRole.MANAGER,
+    UserRole.AGENT,
+  )
   async unpinConversation(
     @Param('tenantId') tenantId: string,
     @Param('conversationId') conversationId: string,
@@ -120,7 +138,12 @@ export class ConversationsController {
   // PATCH /tenants/:tenantId/conversations/:conversationId/archive
   @Patch(':conversationId/archive')
   @HttpCode(HttpStatus.OK)
-  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
+  @Roles(
+    UserRole.TENANT_OWNER,
+    UserRole.TENANT_ADMIN,
+    UserRole.MANAGER,
+    UserRole.AGENT,
+  )
   async archiveConversation(
     @Param('tenantId') tenantId: string,
     @Param('conversationId') conversationId: string,
@@ -134,7 +157,12 @@ export class ConversationsController {
   // PATCH /tenants/:tenantId/conversations/:conversationId/unarchive
   @Patch(':conversationId/unarchive')
   @HttpCode(HttpStatus.OK)
-  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.AGENT)
+  @Roles(
+    UserRole.TENANT_OWNER,
+    UserRole.TENANT_ADMIN,
+    UserRole.MANAGER,
+    UserRole.AGENT,
+  )
   async unarchiveConversation(
     @Param('tenantId') tenantId: string,
     @Param('conversationId') conversationId: string,
@@ -146,22 +174,31 @@ export class ConversationsController {
   }
 
   // PATCH /tenants/:tenantId/conversations/:conversationId/assign
-  // Session 27: new endpoint backing the Inbox — assign conversations matrix
+  // new endpoint backing the Inbox — assign conversations matrix
   // row. Owner/Admin only, per the matrix — Agents can be assignees but
   // cannot perform the assignment themselves.
   // Body: { userId: string | null } — null/omitted unassigns.
+  //
+  // UPDATED (RBAC hierarchy feature) — MANAGER added. Team-scoping (a
+  // Manager may only assign to their own agents, and may only reassign
+  // conversations currently theirs or their own agents') is enforced in
+  // ConversationsService.assignConversation, NOT here — @Roles() can only
+  // check the actor's role, not whose team the target/assignee belongs to.
+  // req.user is passed through as `actor` for that check.
   @Patch(':conversationId/assign')
   @HttpCode(HttpStatus.OK)
-  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN)
+  @Roles(UserRole.TENANT_OWNER, UserRole.TENANT_ADMIN, UserRole.MANAGER)
   async assignConversation(
     @Param('tenantId') tenantId: string,
     @Param('conversationId') conversationId: string,
     @Body() dto: AssignConversationDto,
+    @Req() req: any,
   ) {
     return this.conversationsService.assignConversation(
       tenantId,
       conversationId,
       dto,
+      { id: req.user.userId, role: req.user.role },
     );
   }
 }

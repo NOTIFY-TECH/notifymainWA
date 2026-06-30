@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { IsOptional } from 'class-validator';
 
 // ─── Row shape expected in the uploaded CSV ───────────────────────────────────
 // Only phoneNumber is required. name is accepted if present but not enforced,
@@ -30,6 +31,11 @@ export interface ImportRecipientsResult {
 // Used only to document the multipart file field in Swagger UI.
 // Not used for class-validator input validation (file validation is done
 // in the controller via the uploaded file object itself).
+//
+// @IsOptional() is required here even though file validation happens in the
+// controller — without it, the global ValidationPipe (forbidNonWhitelisted: true)
+// sees 'file' as an unknown property on the body and throws 400 before the
+// controller is even reached.
 
 export class ImportRecipientsDto {
   @ApiProperty({
@@ -37,5 +43,6 @@ export class ImportRecipientsDto {
     format: 'binary',
     description: 'CSV file with a phoneNumber column',
   })
+  @IsOptional()
   file: Express.Multer.File;
 }

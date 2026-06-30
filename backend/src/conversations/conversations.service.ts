@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -7,6 +8,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { ListConversationsDto } from './dto/list-conversations.dto';
 import { AssignConversationDto } from './dto/assign-conversation.dto';
+import { UserRole } from '@prisma/client';
 
 @Injectable()
 export class ConversationsService {
@@ -287,15 +289,33 @@ export class ConversationsService {
   // Session 27: backs the new Inbox — assign conversations permission row
   // (Owner/Admin only — enforced in the controller via @Roles, not here).
   // Passing userId: null (or omitting it) unassigns the conversation.
+  //
+  // UPDATED (RBAC hierarchy feature) — MANAGER can now call this too, but
+  // ONLY within their own team. `actor` is passed in so this method can
+  // apply that extra restriction; Owner/Admin callers are unrestricted as
+  // before (the actor.role === MANAGER branch below simply never fires
+  // for them).
+  //
+  // Allowed states for a Manager: the conversation may currently be
+  // unassigned, assigned to the Manager themselves, or assigned to one of
+  // their own agents — and it may only be assigned TO one of their own
+  // agents (never to themselves via this endpoint, never to another
+  // Manager's agent, never to an Admin/Owner).
 
   async assignConversation(
     tenantId: string,
     conversationId: string,
     dto: AssignConversationDto,
+    actor: { id: string; role: UserRole },
   ) {
     const conversation = await this.prisma.conversation.findFirst({
       where: { id: conversationId, tenantId },
-      select: { id: true, status: true },
+      select: {
+        id: true,
+        status: true,
+        assignedAgentId: true,
+        assignedAgent: { select: { id: true, managerId: true } },
+      },
     });
 
     if (!conversation) {
@@ -304,17 +324,57 @@ export class ConversationsService {
 
     const userId = dto.userId ?? null;
 
+    let assignee: {
+      id: string;
+      role: UserRole;
+      managerId: string | null;
+    } | null = null;
+
     if (userId) {
       // The assignee must belong to the same tenant and be active.
-      const assignee = await this.prisma.user.findFirst({
+      assignee = await this.prisma.user.findFirst({
         where: { id: userId, tenantId, isActive: true },
-        select: { id: true },
+        select: { id: true, role: true, managerId: true },
       });
 
       if (!assignee) {
         throw new BadRequestException(
           'Assignee must be an active member of this tenant.',
         );
+      }
+    }
+
+    if (actor.role === UserRole.MANAGER) {
+      // Destination check: assigning TO someone must be one of the
+      // Manager's own agents.
+      if (userId) {
+        if (
+          assignee?.role !== UserRole.AGENT ||
+          assignee.managerId !== actor.id
+        ) {
+          throw new ForbiddenException(
+            'Managers can only assign conversations to agents on their own team.',
+          );
+        }
+      } else {
+        // Source check: unassigning is only allowed if the conversation is
+        // currently assigned to the Manager themselves or to one of their
+        // own agents — prevents a Manager from unassigning a conversation
+        // that belongs to someone outside their team.
+        const currentAssigneeId = conversation.assignedAgentId;
+        const currentAssigneeIsSelf = currentAssigneeId === actor.id;
+        const currentAssigneeIsOwnAgent =
+          conversation.assignedAgent?.managerId === actor.id;
+
+        if (
+          currentAssigneeId &&
+          !currentAssigneeIsSelf &&
+          !currentAssigneeIsOwnAgent
+        ) {
+          throw new ForbiddenException(
+            'Managers can only reassign conversations within their own team.',
+          );
+        }
       }
     }
 

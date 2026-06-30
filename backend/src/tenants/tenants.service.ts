@@ -17,6 +17,10 @@ import { randomBytes } from 'crypto';
 // shorter given email-change is a more sensitive action than a team invite.
 const EMAIL_VERIFY_TTL_HOURS = 72;
 
+// NEW (RBAC hierarchy feature) — owner-away delegation window. Auto-expires
+// as a safety net; Owner can also cancel early via cancelOwnerAway().
+const OWNER_AWAY_DURATION_DAYS = 7;
+
 @Injectable()
 export class TenantsService {
   private readonly logger = new Logger(TenantsService.name);
@@ -71,6 +75,9 @@ export class TenantsService {
   // to match the ApiResponse<TenantProfile> shape the frontend expects.
   // Previously returned the raw Prisma object, causing useTenantProfile's
   // `select: data => data.data` to always yield undefined → infinite spinner.
+  //
+  // UPDATED (RBAC hierarchy feature): ownerAwayUntil added to select so the
+  // frontend can render the "Owner away until X" banner/toggle state.
   async findById(id: string) {
     const tenant = await this.prisma.tenant.findUnique({
       where: { id },
@@ -86,6 +93,7 @@ export class TenantsService {
         maxSessions: true,
         maxMessages: true,
         maxContacts: true,
+        ownerAwayUntil: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -220,6 +228,53 @@ export class TenantsService {
 
     await this.sendVerificationEmail(tenant.pendingEmail, tenant.name, token);
     return { data: { message: 'Verification email resent.' } };
+  }
+
+  // NEW (RBAC hierarchy feature) — Owner marks themselves away, granting
+  // TENANT_ADMIN temporary access to routes explicitly tagged
+  // @AllowDelegation() (see RolesGuard). Auto-expires after
+  // OWNER_AWAY_DURATION_DAYS; Owner can also end it early via
+  // cancelOwnerAway(). Idempotent — calling this again while already away
+  // simply resets the 7-day window from now, it doesn't stack/extend it
+  // additively, and doesn't error.
+  async ownerAway(tenantId: string) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+    });
+    if (!tenant) throw new NotFoundException('Tenant not found');
+
+    const ownerAwayUntil = new Date();
+    ownerAwayUntil.setDate(ownerAwayUntil.getDate() + OWNER_AWAY_DURATION_DAYS);
+
+    const updated = await this.prisma.tenant.update({
+      where: { id: tenantId },
+      data: { ownerAwayUntil },
+      select: { id: true, ownerAwayUntil: true },
+    });
+
+    this.logger.log(
+      `Tenant ${tenantId}: owner-away enabled until ${updated.ownerAwayUntil?.toISOString()}`,
+    );
+    return { data: updated };
+  }
+
+  // NEW (RBAC hierarchy feature) — ends delegation immediately. Owner-only
+  // at the controller level (Admin cannot self-deescalate — see spec).
+  // Safe to call even if no delegation is currently active (no-op, no error).
+  async cancelOwnerAway(tenantId: string) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+    });
+    if (!tenant) throw new NotFoundException('Tenant not found');
+
+    const updated = await this.prisma.tenant.update({
+      where: { id: tenantId },
+      data: { ownerAwayUntil: null },
+      select: { id: true, ownerAwayUntil: true },
+    });
+
+    this.logger.log(`Tenant ${tenantId}: owner-away cancelled`);
+    return { data: updated };
   }
 
   // ─── Email helper ─────────────────────────────────────────────────────────
