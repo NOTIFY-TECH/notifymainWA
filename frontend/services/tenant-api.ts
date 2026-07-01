@@ -7,6 +7,7 @@ import {
   UpdateTenantProfileResult,
   ResendVerificationResponse,
   VerifyEmailResponse,
+  OwnerAwayResult,
 } from '@/types/tenant';
 
 export const tenantApi = {
@@ -29,6 +30,22 @@ export const tenantApi = {
     const response = await api.post<ApiResponse<ResendVerificationResponse>>(
       `/tenants/${tenantId}/resend-verification`,
     );
+    return response.data;
+  },
+
+  // POST /tenants/:tenantId/owner-away
+  // NEW (RBAC hierarchy feature) — Owner only. Sets a 7-day delegation
+  // window (server-side). Idempotent — calling again resets the window
+  // from now rather than stacking.
+  async ownerAway(tenantId: string): Promise<OwnerAwayResult> {
+    const response = await api.post<OwnerAwayResult>(`/tenants/${tenantId}/owner-away`);
+    return response.data;
+  },
+
+  // POST /tenants/:tenantId/owner-away/cancel
+  // NEW (RBAC hierarchy feature) — Owner only. Admin cannot self-deescalate.
+  async cancelOwnerAway(tenantId: string): Promise<OwnerAwayResult> {
+    const response = await api.post<OwnerAwayResult>(`/tenants/${tenantId}/owner-away/cancel`);
     return response.data;
   },
 

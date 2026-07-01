@@ -23,6 +23,6 @@
     "forceConsistentCasingInFileNames": true,
     "ignoreDeprecations": "5.0"
   },
-  "include": ["src/**/*", "scripts/**/*"],
+  "include": ["src/**/*", "scripts/**/*", "prisma/**/*"],
   "exclude": ["node_modules", "dist"]
 }

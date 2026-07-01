@@ -1,7 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { useTenantProfile, useUpdateTenantProfile, useResendVerification } from '@/hooks/useTenant';
+import {
+  useTenantProfile,
+  useUpdateTenantProfile,
+  useResendVerification,
+  useOwnerAway,
+  useCancelOwnerAway,
+} from '@/hooks/useTenant';
 import { useAuthStore } from '@/store/authStore';
 import { TenantProfile } from '@/types/tenant';
 import { Button } from '@/components/ui/button';
@@ -19,6 +25,8 @@ import {
   Users,
   MessageSquare,
   Smartphone,
+  UserX,
+  ShieldAlert,
 } from 'lucide-react';
 import { formatDistanceToNow, format } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -44,6 +52,7 @@ export default function SettingsProfilePage() {
 function ProfileForm({ profile }: { profile: TenantProfile }) {
   const currentUser = useAuthStore(s => s.user);
   const isOwner = currentUser?.role === 'TENANT_OWNER';
+  const isAdmin = currentUser?.role === 'TENANT_ADMIN';
 
   const { mutateAsync: updateProfile, isPending: isSaving } = useUpdateTenantProfile();
   const { mutate: resendVerification, isPending: isResending } = useResendVerification();
@@ -201,6 +210,9 @@ function ProfileForm({ profile }: { profile: TenantProfile }) {
               </div>
             )}
           </div>
+
+          {/* Owner-away delegation card — Owner (full control) or Admin (read-only) */}
+          {(isOwner || isAdmin) && <OwnerAwayCard profile={profile} isOwner={isOwner} />}
         </div>
 
         {/* ── Right col: read-only meta ── */}
@@ -288,6 +300,92 @@ function ProfileForm({ profile }: { profile: TenantProfile }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Owner-away delegation card (NEW — RBAC hierarchy feature) ────────────────
+//
+// Owner: full toggle. Not away → "Mark as away" activates a 7-day
+// delegation window (server-side, resets from now if called again while
+// already active). Away → shows expiry + a "Cancel" button to end early.
+//
+// Admin: read-only. Only rendered at all while a window is active — Admin
+// cannot activate, extend, or cancel delegation (owner-away/cancel is
+// Owner-only server-side, and Admin self-deescalation was explicitly
+// disallowed per the RBAC spec), so there's nothing actionable to show
+// when no window is active.
+
+function OwnerAwayCard({ profile, isOwner }: { profile: TenantProfile; isOwner: boolean }) {
+  const { mutate: ownerAway, isPending: isActivating } = useOwnerAway();
+  const { mutate: cancelOwnerAway, isPending: isCancelling } = useCancelOwnerAway();
+
+  const isAway = !!profile.ownerAwayUntil && new Date(profile.ownerAwayUntil) > new Date();
+
+  // Admin viewing while no window is active — nothing to show.
+  if (!isOwner && !isAway) return null;
+
+  return (
+    <div className="glass rounded-[var(--radius)] p-5 space-y-4">
+      <div className="flex items-center gap-2.5">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[hsl(var(--muted))]">
+          <UserX size={15} className="text-amber-400" />
+        </div>
+        <div>
+          <h2 className="text-sm font-semibold text-[hsl(var(--foreground))]">Owner-away delegation</h2>
+          {isOwner && (
+            <p className="text-[11px] text-[hsl(var(--muted-foreground))]">
+              Temporarily grant Admin access to billing and profile settings
+            </p>
+          )}
+        </div>
+      </div>
+
+      {isAway ? (
+        <div className="flex items-start gap-3 rounded-lg bg-amber-500/8 border border-amber-500/20 px-4 py-3">
+          <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0 space-y-0.5">
+            <p className="text-xs font-medium text-amber-400">{isOwner ? 'You are marked away' : 'Owner is away'}</p>
+            <p className="text-[11px] text-amber-400/70">
+              Admin has delegated access until{' '}
+              <span className="font-semibold text-amber-400">
+                {format(new Date(profile.ownerAwayUntil as string), 'MMM d, yyyy, h:mm a')}
+              </span>{' '}
+              ({formatDistanceToNow(new Date(profile.ownerAwayUntil as string), { addSuffix: true })})
+            </p>
+          </div>
+          {isOwner && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => cancelOwnerAway()}
+              disabled={isCancelling}
+              className="shrink-0 text-xs h-7"
+            >
+              {isCancelling ? <Loader2 className="w-3 h-3 animate-spin" /> : 'End now'}
+            </Button>
+          )}
+        </div>
+      ) : (
+        isOwner && (
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[11px] text-[hsl(var(--muted-foreground))] max-w-sm">
+              While away, an Admin can edit company profile and billing settings on your behalf for up to 7 days.
+              Destructive actions like deleting the workspace stay owner-only regardless.
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => ownerAway()}
+              disabled={isActivating}
+              className="shrink-0 text-xs h-7 gap-1.5"
+            >
+              {isActivating ? <Loader2 className="w-3 h-3 animate-spin" /> : <UserX className="w-3 h-3" />}
+              Mark as away
+            </Button>
+          </div>
+        )
+      )}
     </div>
   );
 }

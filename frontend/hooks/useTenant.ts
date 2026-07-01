@@ -1,6 +1,6 @@
 import { tenantApi } from '@/services/tenant-api';
 import { useAuthStore } from '@/store/authStore';
-import { TenantProfile, UpdateTenantProfileRequest, UpdateTenantProfileResult } from '@/types/tenant';
+import { TenantProfile, UpdateTenantProfileRequest, UpdateTenantProfileResult, OwnerAwayResult } from '@/types/tenant';
 import { ApiResponse } from '@/types/index';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
@@ -57,6 +57,41 @@ export function useResendVerification() {
       // Expiry timestamp moves forward — refetch so the banner's
       // "expires in X" text stays accurate.
       queryClient.invalidateQueries({ queryKey: tenantKeys.profile(tenantId) });
+    },
+  });
+}
+
+// ─── useOwnerAway / useCancelOwnerAway ─────────────────────────────────────────
+// NEW (RBAC hierarchy feature) — both mutations patch only ownerAwayUntil
+// into the existing TenantProfile cache entry, since the backend responses
+// return just { id, ownerAwayUntil }, not a full profile.
+
+export function useOwnerAway() {
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => tenantApi.ownerAway(tenantId),
+    onSuccess: (result: OwnerAwayResult) => {
+      queryClient.setQueryData<ApiResponse<TenantProfile>>(tenantKeys.profile(tenantId), old => {
+        if (!old) return old;
+        return { ...old, data: { ...old.data, ownerAwayUntil: result.data.ownerAwayUntil } };
+      });
+    },
+  });
+}
+
+export function useCancelOwnerAway() {
+  const tenantId = useAuthStore(s => s.tenant?.id ?? '');
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => tenantApi.cancelOwnerAway(tenantId),
+    onSuccess: (result: OwnerAwayResult) => {
+      queryClient.setQueryData<ApiResponse<TenantProfile>>(tenantKeys.profile(tenantId), old => {
+        if (!old) return old;
+        return { ...old, data: { ...old.data, ownerAwayUntil: result.data.ownerAwayUntil } };
+      });
     },
   });
 }

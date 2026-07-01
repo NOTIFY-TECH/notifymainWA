@@ -10,6 +10,10 @@ export interface TenantProfile {
   maxSessions: number;
   maxMessages: number;
   maxContacts: number;
+  // NEW (RBAC hierarchy feature) — when set and in the future, TENANT_ADMIN
+  // has delegated access to routes tagged @AllowDelegation(). null = no
+  // active delegation window.
+  ownerAwayUntil: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -35,4 +39,18 @@ export interface ResendVerificationResponse {
 export interface VerifyEmailResponse {
   message: string;
   email: string;
+}
+
+// ─── Owner-away delegation (NEW — RBAC hierarchy feature) ─────────────────────
+//
+// Mirrors TenantsService.ownerAway()/cancelOwnerAway()'s response exactly —
+// both return only the narrow { id, ownerAwayUntil } select, not the full
+// TenantProfile. The frontend patches ownerAwayUntil into the existing
+// TenantProfile cache entry on success rather than replacing the whole object.
+
+export interface OwnerAwayResult {
+  data: {
+    id: string;
+    ownerAwayUntil: string | null;
+  };
 }

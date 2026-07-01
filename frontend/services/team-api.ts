@@ -6,9 +6,11 @@ import {
   InviteTokenInfo,
   InviteMemberRequest,
   UpdateMemberRoleRequest,
+  UpdateMemberManagerRequest,
   AcceptInviteRequest,
   AcceptInviteResponse,
   TeamMember,
+  AgentPerformanceStats,
 } from '@/types/team';
 
 export const teamApi = {
@@ -47,6 +49,29 @@ export const teamApi = {
     data: UpdateMemberRoleRequest,
   ): Promise<ApiResponse<TeamMember>> {
     const response = await api.patch<ApiResponse<TeamMember>>(`/tenants/${tenantId}/team/${userId}/role`, data);
+    return response.data;
+  },
+
+  // PATCH /tenants/:tenantId/team/:userId/manager
+  // NEW (RBAC hierarchy feature) — assign/change/clear which Manager an
+  // Agent reports to. Owner/Admin only (enforced server-side).
+  async updateMemberManager(
+    tenantId: string,
+    userId: string,
+    data: UpdateMemberManagerRequest,
+  ): Promise<ApiResponse<TeamMember>> {
+    const response = await api.patch<ApiResponse<TeamMember>>(`/tenants/${tenantId}/team/${userId}/manager`, data);
+    return response.data;
+  },
+
+  // GET /tenants/:tenantId/team/my-agents/performance
+  // NEW (RBAC hierarchy feature) — MANAGER only. Auto-scoped server-side to
+  // req.user.userId (TeamService.getMyAgentsPerformance) — no params needed
+  // beyond tenantId, the caller's own agents are resolved on the backend.
+  async getMyAgentsPerformance(tenantId: string): Promise<ApiResponse<AgentPerformanceStats[]>> {
+    const response = await api.get<ApiResponse<AgentPerformanceStats[]>>(
+      `/tenants/${tenantId}/team/my-agents/performance`,
+    );
     return response.data;
   },
 

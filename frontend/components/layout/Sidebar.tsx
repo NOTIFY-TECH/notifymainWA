@@ -7,6 +7,7 @@ import { useUIStore } from '@/store/uiStore';
 import { useAuthStore } from '@/store/authStore';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import SupportModal from '@/components/support/SupportModal';
+import { UserRole } from '@/types/auth';
 import {
   LayoutDashboard,
   Smartphone,
@@ -21,18 +22,40 @@ import {
   Zap,
   X,
   LifeBuoy,
+  TrendingUp,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 // ─── Nav Config ───────────────────────────────────────────────────────────────
+//
+// `roles` is optional per item (NEW — RBAC hierarchy feature, Team
+// Performance page). Omitted = visible to everyone, same as before this
+// field existed. When present, the item only renders for users whose role
+// is in the list. Existing items are all unchanged (no `roles` field), so
+// their visibility is exactly the same as before.
 
-const NAV_SECTIONS = [
+interface NavItem {
+  label: string;
+  href: string;
+  icon: typeof LayoutDashboard;
+  roles?: UserRole[];
+}
+
+interface NavSection {
+  label: string;
+  items: NavItem[];
+}
+
+const NAV_SECTIONS: NavSection[] = [
   {
     label: 'Main',
     items: [
       { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
       { label: 'Sessions', href: '/dashboard/sessions', icon: Smartphone },
       { label: 'Inbox', href: '/dashboard/inbox', icon: MessageSquare },
+      // NEW (RBAC hierarchy feature) — Manager-only. Can't live under
+      // Settings → Team since that page hard-gates to Admin/Owner.
+      { label: 'Team Performance', href: '/dashboard/team-performance', icon: TrendingUp, roles: ['MANAGER'] },
     ],
   },
   {
@@ -90,6 +113,14 @@ export default function Sidebar() {
   }, [sidebarOpen]);
 
   const isActive = (href: string) => (href === '/dashboard' ? pathname === '/dashboard' : pathname.startsWith(href));
+
+  // Filter nav items by role. Items with no `roles` field stay visible to
+  // everyone (unchanged behavior). Sections that end up with zero visible
+  // items are dropped entirely rather than rendering an empty header.
+  const visibleSections = NAV_SECTIONS.map(section => ({
+    ...section,
+    items: section.items.filter(item => !item.roles || (!!user?.role && item.roles.includes(user.role))),
+  })).filter(section => section.items.length > 0);
 
   // ── Help button variants ──────────────────────────────────────────────────
 
@@ -182,7 +213,7 @@ export default function Sidebar() {
 
         {/* ── Navigation ── */}
         <nav className="flex-1 overflow-y-auto overflow-x-hidden py-4 px-2 space-y-5">
-          {NAV_SECTIONS.map(section => (
+          {visibleSections.map(section => (
             <div key={section.label}>
               {/* Section label */}
               <p

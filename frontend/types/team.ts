@@ -5,7 +5,8 @@ import { UserRole } from '@/types/auth';
 export type { UserRole };
 
 // Roles that can be assigned when inviting a new member
-export const INVITABLE_ROLES: UserRole[] = ['TENANT_ADMIN', 'AGENT'];
+// UPDATED (RBAC hierarchy feature) — MANAGER added.
+export const INVITABLE_ROLES: UserRole[] = ['TENANT_ADMIN', 'MANAGER', 'AGENT'];
 
 // Human-readable labels for display
 export const ROLE_LABELS: Record<UserRole, string> = {
@@ -27,6 +28,9 @@ export interface TeamMember {
   isActive: boolean;
   lastLoginAt: string | null;
   createdAt: string;
+  // NEW (RBAC hierarchy feature) — which Manager this member (if an Agent)
+  // reports to. null for unassigned Agents and for all non-Agent roles.
+  managerId: string | null;
 }
 
 // ─── Pending invitation ───────────────────────────────────────────────────────
@@ -72,10 +76,34 @@ export interface UpdateMemberRoleRequest {
   role: UserRole;
 }
 
+// NEW (RBAC hierarchy feature) — assign/change/clear an Agent's manager.
+// managerId: null explicitly unassigns.
+export interface UpdateMemberManagerRequest {
+  managerId: string | null;
+}
+
 export interface AcceptInviteRequest {
   firstName: string;
   lastName: string;
   password: string;
+}
+
+// ─── Manager performance tab (NEW — RBAC hierarchy feature) ──────────────────
+//
+// Mirrors TeamService.getMyAgentsPerformance()'s per-agent shape exactly.
+// Response-time is intentionally not included — explicitly descoped per
+// project decision at the backend. Endpoint is MANAGER-only and
+// auto-scoped server-side to the caller's own agents; no request params.
+
+export interface AgentPerformanceStats {
+  id: string;
+  name: string;
+  email: string;
+  isActive: boolean;
+  messagesSent: number;
+  conversationsHandled: number;
+  conversationsResolved: number;
+  campaignsCreated: number;
 }
 
 // ─── acceptInvite response ────────────────────────────────────────────────────

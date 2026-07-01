@@ -7,6 +7,7 @@ import {
   useResendInvite,
   useRevokeInvite,
   useUpdateMemberRole,
+  useUpdateMemberManager,
   useRemoveMember,
 } from '@/hooks/useTeam';
 import { useAuthStore } from '@/store/authStore';
@@ -101,6 +102,8 @@ function InviteMemberModal({ open, onOpenChange }: { open: boolean; onOpenChange
             </select>
             <p className="text-[11px] text-[hsl(var(--muted-foreground))]">
               {role === 'TENANT_ADMIN' && 'Can manage sessions, campaigns, and team members.'}
+              {role === 'MANAGER' &&
+                'Can manage their assigned agents, reassign conversations within their team, and view team performance.'}
               {role === 'AGENT' && 'Can view and reply in the inbox. Cannot manage settings.'}
             </p>
           </div>
@@ -173,6 +176,50 @@ function RoleSelect({
   );
 }
 
+// ─── Manager picker dropdown ──────────────────────────────────────────────────
+// NEW (RBAC hierarchy feature) — only rendered for AGENT rows, Admin/Owner
+// only. Shows all Managers in the tenant as options, plus an "Unassigned"
+// option. Patches the cache directly on success via useUpdateMemberManager.
+
+function ManagerSelect({
+  agentId,
+  currentManagerId,
+  managers,
+}: {
+  agentId: string;
+  currentManagerId: string | null;
+  managers: TeamMember[];
+}) {
+  const { mutate: updateManager, isPending } = useUpdateMemberManager();
+
+  const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    updateManager({
+      userId: agentId,
+      data: { managerId: val === '' ? null : val },
+    });
+  };
+
+  return (
+    <div className="flex items-center gap-1.5">
+      {isPending && <Loader2 className="w-3 h-3 animate-spin text-[hsl(var(--muted-foreground))]" />}
+      <select
+        value={currentManagerId ?? ''}
+        disabled={isPending}
+        onChange={handleChange}
+        className="h-7 rounded-md border border-[hsl(var(--border))] bg-transparent px-2 text-xs text-[hsl(var(--foreground))] focus:outline-none focus:ring-1 focus:ring-[hsl(var(--green))] disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <option value="">Unassigned</option>
+        {managers.map(m => (
+          <option key={m.id} value={m.id}>
+            {m.firstName} {m.lastName}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 // ─── Access-denied state (Session 26) ─────────────────────────────────────────
 // Agents no longer have visibility into the team roster. The backend route
 // is now guarded too (TeamController.listMembers — Owner/Admin only), so
@@ -203,8 +250,8 @@ export default function TeamPage() {
   const isOwner = currentUser?.role === 'TENANT_OWNER';
   const isAdminOrOwner = isOwner || currentUser?.role === 'TENANT_ADMIN';
 
-  // Session 26: gate the whole page for Agent before any team data hooks
-  // run, so we never even attempt the now-restricted listMembers call.
+  // Session 26: gate the whole page for Agent/Manager before any team data
+  // hooks run, so we never even attempt the now-restricted listMembers call.
   if (!isAdminOrOwner) {
     return <TeamAccessDenied />;
   }
@@ -229,6 +276,10 @@ function TeamPageContent({
   const [inviteOpen, setInviteOpen] = useState(false);
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+
+  // All active Managers in this tenant — used to populate the ManagerSelect
+  // picker for every Agent row. Derived from the same team list, no extra fetch.
+  const managers = team?.members.filter(m => m.role === 'MANAGER') ?? [];
 
   const handleRemove = (member: TeamMember) => {
     if (confirm(`Remove ${member.firstName} ${member.lastName} from the team? They will lose access immediately.`)) {
@@ -301,6 +352,9 @@ function TeamPageContent({
                 <th className="px-4 py-2.5 text-left text-[11px] font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wide">
                   Role
                 </th>
+                <th className="px-4 py-2.5 text-left text-[11px] font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wide hidden md:table-cell">
+                  Manager
+                </th>
                 <th className="px-4 py-2.5 text-left text-[11px] font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wide hidden sm:table-cell">
                   Last active
                 </th>
@@ -314,14 +368,21 @@ function TeamPageContent({
               {team.members.map((member, idx) => {
                 const isCurrentUser = member.id === currentUser?.id;
                 const isThisOwner = member.role === 'TENANT_OWNER';
+                const isAgent = member.role === 'AGENT';
                 const canChangeRole = isOwner && !isCurrentUser && !isThisOwner;
                 const canRemove = isAdminOrOwner && !isCurrentUser && !isThisOwner;
+                // Manager picker: only for Agent rows, only Admin/Owner can set
+                const canSetManager = isAdminOrOwner && isAgent;
+
+                // Resolve current manager's display name from the team list
+                const currentManager = member.managerId ? managers.find(m => m.id === member.managerId) : null;
 
                 return (
                   <tr
                     key={member.id}
                     className={`border-b border-[hsl(var(--border))] last:border-0 ${idx % 2 === 0 ? '' : 'bg-[hsl(var(--muted))/0.2]'}`}
                   >
+                    {/* Member */}
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2.5">
                         <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[hsl(var(--purple))]/10 text-[hsl(var(--purple))] text-[11px] font-semibold">
@@ -341,6 +402,8 @@ function TeamPageContent({
                         </div>
                       </div>
                     </td>
+
+                    {/* Role */}
                     <td className="px-4 py-3">
                       {canChangeRole ? (
                         <RoleSelect currentRole={member.role} memberId={member.id} disabled={false} />
@@ -348,6 +411,23 @@ function TeamPageContent({
                         <RoleBadge role={member.role} />
                       )}
                     </td>
+
+                    {/* Manager — only meaningful for Agent rows */}
+                    <td className="px-4 py-3 hidden md:table-cell">
+                      {canSetManager ? (
+                        <ManagerSelect agentId={member.id} currentManagerId={member.managerId} managers={managers} />
+                      ) : isAgent && currentManager ? (
+                        // Agent but current user can't change it (shouldn't happen
+                        // given isAdminOrOwner gate above, but defensive)
+                        <span className="text-xs text-[hsl(var(--muted-foreground))]">
+                          {currentManager.firstName} {currentManager.lastName}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-[hsl(var(--muted-foreground))]">—</span>
+                      )}
+                    </td>
+
+                    {/* Last active */}
                     <td className="px-4 py-3 hidden sm:table-cell">
                       <span className="text-xs text-[hsl(var(--muted-foreground))]">
                         {member.lastLoginAt
@@ -355,11 +435,15 @@ function TeamPageContent({
                           : 'Never'}
                       </span>
                     </td>
+
+                    {/* Joined */}
                     <td className="px-4 py-3 hidden sm:table-cell">
                       <span className="text-xs text-[hsl(var(--muted-foreground))]">
                         {format(new Date(member.createdAt), 'MMM d, yyyy')}
                       </span>
                     </td>
+
+                    {/* Actions */}
                     <td className="px-4 py-3 text-right">
                       {canRemove && (
                         <button
@@ -450,8 +534,9 @@ function TeamPageContent({
         <ShieldCheck size={14} className="text-[hsl(var(--muted-foreground))] shrink-0 mt-0.5" />
         <p className="text-[11px] text-[hsl(var(--muted-foreground))] leading-relaxed">
           <span className="font-medium text-[hsl(var(--foreground))]">Owner</span> can change roles and manage all
-          members. <span className="font-medium text-[hsl(var(--foreground))]">Admins</span> can invite and remove
-          agents. Role changes take effect immediately.
+          members. <span className="font-medium text-[hsl(var(--foreground))]">Admins</span> can invite, remove agents,
+          and assign managers. <span className="font-medium text-[hsl(var(--foreground))]">Managers</span> can handle
+          conversations for their assigned agents. Role changes take effect immediately.
         </p>
       </div>
 
